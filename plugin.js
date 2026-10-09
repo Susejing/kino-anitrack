@@ -5,22 +5,22 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.3";
+const VERSION = "0.2.4";
 
 // ---------- utilidades ----------
 
 // QuickJS no tiene fetch ni setTimeout: todo pasa por kino.fetch y kino.sleep.
 // Primera instrucción de toda función async: un await (regla de Kino 0.9.49-).
 
-// En un fallo HTTP se intenta leer el cuerpo de la respuesta para saber qué
-// dijo el servidor (AniList explica sus errores ahí).
+// En un fallo HTTP se lee el cuerpo de la respuesta para saber qué dijo el
+// servidor: AniList explica en un campo "validation" qué campo rechazó y por qué.
 async function fetchJson(url, options) {
   const r = await kino.fetch(url, options);
   if (!r.ok) {
     let detalle = "http " + r.status;
     try {
       const cuerpo = await r.text();
-      if (cuerpo) detalle = detalle + " " + String(cuerpo).slice(0, 150);
+      if (cuerpo) detalle = detalle + " " + String(cuerpo).slice(0, 500);
     } catch (e2) { /* sin cuerpo legible */ }
     const e = new Error(detalle);
     e.status = r.status;
@@ -129,12 +129,16 @@ async function resolverAnime(ids, title) {
 
 async function enAniList(token, { anilistId, progress, status }) {
   await null;
+  // El argumento progress solo viaja cuando hay un número: en un "start"
+  // no se toca nada de progreso. Así nunca se manda un valor vacío que
+  // AniList pueda rechazar en su validación.
+  const variables = { id: anilistId, p: progress === null ? undefined : progress, s: status };
   const r = await fetchJson("https://graphql.anilist.co", {
     method: "POST",
     headers: { Authorization: "Bearer " + token },
     body: { json: {
       query: "mutation ($id: Int, $p: Int, $s: MediaListStatus) { SaveMediaListEntry(mediaId: $id, progress: $p, status: $s) { id } }",
-      variables: { id: anilistId, p: progress, s: status }
+      variables
     } }
   });
   if (!r.data || !r.data.SaveMediaListEntry) {
@@ -189,18 +193,20 @@ async function enMAL(malId, { progress, status }) {
 
 // ---------- track (la capability "tracking") ----------
 
-// Solo se actúa en dos momentos: "start" (marcar como viendo) y "watched"
-// (se dispara una sola vez, con 3 minutos o menos y al menos 90% visto).
-// Todo lo demás se ignora sin error. Todo fallo sale con un kino.error con
-// detalle: la línea roja y el registro siempre dicen por qué.
+// Solo se actúa en "watched": el episodio o película terminado (se dispara
+// una sola vez, con 3 minutos o menos y al menos 90% visto). Los "start" no
+// tocan la lista: así nunca se manda un progreso vacío y un anime que ya
+// tenías como Completado no se degrada a Watching solo por revisarlo.
+// Los demás tipos de evento se ignoran sin error. Todo fallo sale con un
+// kino.error con detalle: la línea roja y el registro siempre dicen por qué.
 export async function track(event) {
   await null;
+  if (event.type !== "watched") return { ok: true };
   const anilistToken = tokenAniList();
   const malListo = kino.config.get("malClientId") && kino.config.get("malRefreshToken");
   if (!anilistToken && !malListo) {
     throw kino.error("auth_required", "configura tus tokens en Ajustes");
   }
-  if (event.type !== "start" && event.type !== "watched") return { ok: true };
   if (yaEntregado(event.id)) return { ok: true };
 
   const ids = event.kind === "episode" ? (event.show && event.show.ids) || {} : event.ids || {};
@@ -215,18 +221,20 @@ export async function track(event) {
 
     const pelicula = event.kind === "movie";
     const episodio = event.episode || 1;
-    const progreso = event.type === "watched" ? (pelicula ? 1 : episodio) : null;
-    const estado = pelicula && event.type === "watched" ? "COMPLETED" : "CURRENT";
+    // En "watched" siempre hay un número: 1 para una película, el número de
+    // episodio para una serie.
+    const progreso = pelicula ? 1 : episodio;
+    const estado = pelicula ? "COMPLETED" : "CURRENT";
 
     const resultado = { ok: true };
     if (anime.anilist && anilistToken) {
       try {
         await enAniList(anilistToken, { anilistId: anime.anilist, progress: progreso, status: estado });
-        kino.log("anilist: actualizado, episodio", progreso === null ? "-" : progreso);
+        kino.log("anilist: actualizado, episodio", progreso);
       } catch (e) {
         resultado.anilist = false;
         const porque = String(e.message || e.status || e.code).slice(0, 180);
-        kino.log("anilist falló:", porque);
+        kino.log("anilist falló:", String(e.status || porque).slice(0, 200));
         throw kino.error("unavailable", "anilist " + porque.slice(0, 100),
           { userMessage: "AniList rechazó la actualización. Revisa el registro." });
       }
@@ -234,10 +242,10 @@ export async function track(event) {
     if (anime.mal && malListo) {
       try {
         await enMAL(anime.mal, {
-          progress: progreso === null ? 0 : progreso,
+          progress: progreso,
           status: estado === "COMPLETED" ? "completed" : "watching"
         });
-        kino.log("mal: actualizado, episodio", progreso === null ? "-" : progreso);
+        kino.log("mal: actualizado, episodio", progreso);
       } catch (e) {
         resultado.mal = false;
         kino.log("mal falló:", String(e.status || e.code || e.message).slice(0, 120));
