@@ -1,13 +1,14 @@
 {
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "apiVersion": 7,
   "entry": "plugin.js",
   "icon": "icon.png",
   "description": "Actualiza tu progreso de anime en AniList y MyAnimeList cada vez que terminas un episodio o una película, sin importar desde qué fuente lo reproduzcas en Kino.",
   "hosts": ["graphql.anilist.co", "api.myanimelist.net", "arm.haglund.dev"],
   "capabilities": ["tracking"],
+  "debug": true,
   "settings": [
     { "key": "cuentas", "label": "Tus cuentas", "type": "section", "hint": "Pega tus tokens de AniList y MyAnimeList. Los tokens nunca salen de este aparato más que hacia cada servicio. Kino te pedirá confirmar en rojo que este plugin puede ver lo que reproduces: es lo que permite marcar tu progreso." },
     { "key": "anilistToken1", "label": "Token de AniList (parte 1)", "type": "password", "hint": "Pega el token partido en tres partes, en orden" },
