@@ -9,7 +9,7 @@
   "capabilities": ["tracking"],
   "settings": [
     { "key": "cuentas", "label": "Tus cuentas", "type": "section", "hint": "Pega tus tokens de AniList y MyAnimeList. Los tokens nunca salen de este aparato más que hacia cada servicio. Kino te pedirá confirmar en rojo que este plugin puede ver lo que reproduces: es lo que permite marcar tu progreso." },
-    { "key": "anilistToken1", "label": "Token de AniList (parte 1)", "type": "password", "hint": "El token de AniList es muy largo: pégalo partido en estas tres partes, en orden (ver README)" },
+    { "key": "anilistToken1", "label": "Token de AniList (parte 1)", "type": "password", "hint": "Pega el token partido en tres partes, en orden" },
     { "key": "anilistToken2", "label": "Token de AniList (parte 2)", "type": "password" },
     { "key": "anilistToken3", "label": "Token de AniList (parte 3)", "type": "password" },
     { "key": "malClientId", "label": "Client ID de MyAnimeList", "type": "text", "hint": "De tu app en myanimelist.net/apiconfig" },
