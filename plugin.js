@@ -5,17 +5,24 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.1";
+const VERSION = "0.2.2";
 
 // ---------- utilidades ----------
 
 // QuickJS no tiene fetch ni setTimeout: todo pasa por kino.fetch y kino.sleep.
 // Primera instrucción de toda función async: un await (regla de Kino 0.9.49-).
 
+// En un fallo HTTP se intenta leer el cuerpo de la respuesta para saber qué
+// dijo el servidor (AniList explica sus errores ahí).
 async function fetchJson(url, options) {
   const r = await kino.fetch(url, options);
   if (!r.ok) {
-    const e = new Error("http " + r.status);
+    let detalle = "http " + r.status;
+    try {
+      const cuerpo = await r.text();
+      if (cuerpo) detalle = detalle + " " + String(cuerpo).slice(0, 150);
+    } catch (e2) { /* sin cuerpo legible */ }
+    const e = new Error(detalle);
     e.status = r.status;
     throw e;
   }
@@ -23,12 +30,18 @@ async function fetchJson(url, options) {
 }
 
 // Evita entregar dos veces el mismo evento (Kino reintenta; el id es la clave).
+// Si el almacenamiento fallara, no debe tumbar la entrega: se ignora y sigue.
 function yaEntregado(id) {
-  const seen = kino.storage.get("seen") || [];
-  if (seen.includes(id)) return true;
-  seen.push(id);
-  while (seen.length > 50) seen.shift();
-  kino.storage.set("seen", seen, 2592000000); // 30 días
+  try {
+    let seen = kino.storage.get("seen");
+    if (!Array.isArray(seen)) seen = [];
+    if (seen.indexOf(id) >= 0) return true;
+    seen.push(id);
+    while (seen.length > 50) seen.shift();
+    kino.storage.set("seen", seen, 2500000000); // margen bajo el máximo
+  } catch (e) {
+    kino.log("storage falló:", e.code || "sin código");
+  }
   return false;
 }
 
@@ -64,7 +77,7 @@ async function resolverAnime(ids, title) {
       }
       kino.log("resolver: ARM no lo encontró");
     } catch (e) {
-      kino.log("resolver: ARM falló con", e.status || e.code || e.message);
+      kino.log("resolver: ARM falló:", String(e.status || e.code || e.message).slice(0, 120));
     }
   }
   if (title) {
@@ -83,7 +96,7 @@ async function resolverAnime(ids, title) {
       }
       kino.log("resolver: búsqueda por título sin resultados");
     } catch (e) {
-      kino.log("resolver: búsqueda falló con", e.status || e.code || e.message);
+      kino.log("resolver: búsqueda falló:", String(e.status || e.code || e.message).slice(0, 120));
     }
   }
   return null;
@@ -125,7 +138,7 @@ async function malToken() {
   });
   if (!r.access_token) throw new Error("MAL no devolvió token");
   // Se renueva un poco antes del vencimiento real.
-  kino.storage.set("malAccessToken", r.access_token, Math.min((r.expires_in || 2678400) - 86400, 2592000000));
+  kino.storage.set("malAccessToken", r.access_token, Math.min((r.expires_in || 2678400) - 86400, 2500000000));
   return r.access_token;
 }
 
@@ -155,8 +168,8 @@ async function enMAL(malId, { progress, status }) {
 
 // Solo se actúa en dos momentos: "start" (marcar como viendo) y "watched"
 // (se dispara una sola vez, con 3 minutos o menos y al menos 90% visto).
-// Los demás tipos de evento se ignoran sin error. Todo falla con un
-// kino.error con detalle, para que el registro y la línea roja digan por qué.
+// Todo lo demás se ignora sin error. Todo fallo sale con un kino.error con
+// detalle: la línea roja y el registro siempre dicen por qué.
 export async function track(event) {
   await null;
   const anilistToken = tokenAniList();
@@ -189,9 +202,10 @@ export async function track(event) {
         kino.log("anilist: actualizado, episodio", progreso === null ? "-" : progreso);
       } catch (e) {
         resultado.anilist = false;
-        kino.log("anilist falló:", e.status || e.code || e.message);
-        throw kino.error("unavailable", "anilist " + (e.status || e.code || e.message),
-          { userMessage: "AniList respondió " + (e.status || e.message) + ". Se vuelve a intentar luego." });
+        const porque = String(e.status || e.code || e.message).slice(0, 100);
+        kino.log("anilist falló:", porque);
+        throw kino.error("unavailable", "anilist " + porque,
+          { userMessage: "AniList respondió " + porque.slice(0, 30) + ". Se reintenta luego." });
       }
     }
     if (anime.mal && malListo) {
@@ -203,18 +217,19 @@ export async function track(event) {
         kino.log("mal: actualizado, episodio", progreso === null ? "-" : progreso);
       } catch (e) {
         resultado.mal = false;
-        kino.log("mal falló:", e.status || e.code || e.message);
+        kino.log("mal falló:", String(e.status || e.code || e.message).slice(0, 120));
       }
     }
     kino.log("track entregado:", event.type);
     return resultado;
   } catch (e) {
-    // Los kino.error pasan tal cual; cualquier otra falla se reporta con
-    // detalle para que la línea roja y el registro digan qué pasó.
-    if (e && e.code === "unavailable" || e && e.code === "auth_required" || e && e.code === "rate_limited") throw e;
-    kino.log("track falló:", e.status || e.code || e.message);
-    throw kino.error("unavailable", "track " + (e.status || e.code || e.message),
-      { userMessage: "Falló el aviso: " + String(e.status || e.code || e.message) + ". Se reintenta luego." });
+    // Errores con código (kino.error o kino.fetch) pasan tal cual.
+    // Cualquier otra falla inesperada se reporta con su motivo.
+    if (e && typeof e.code === "string") throw e;
+    const porque = String((e && (e.status || e.message)) || "desconocido").slice(0, 100);
+    kino.log("track falló:", porque);
+    throw kino.error("unavailable", "track " + porque,
+      { userMessage: "Falló el aviso, motivo: " + porque.slice(0, 60) + ". Se reintenta luego." });
   }
 }
 
