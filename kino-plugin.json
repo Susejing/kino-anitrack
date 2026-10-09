@@ -4,6 +4,7 @@
   "version": "0.2.0",
   "apiVersion": 7,
   "entry": "plugin.js",
+  "icon": "icon.png",
   "description": "Actualiza tu progreso de anime en AniList y MyAnimeList cada vez que terminas un episodio o una película, sin importar desde qué fuente lo reproduzcas en Kino.",
   "hosts": ["graphql.anilist.co", "api.myanimelist.net", "arm.haglund.dev"],
   "capabilities": ["tracking"],
