@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.2";
+const VERSION = "0.2.3";
 
 // ---------- utilidades ----------
 
@@ -47,11 +47,34 @@ function yaEntregado(id) {
 
 // El token de AniList supera los 500 caracteres máximos de un campo de
 // ajustes, así que se pega partido en tres: aquí se vuelve a unir.
-function tokenAniList() {
+function unirToken(objeto) {
   const limpio = (s) => String(s || "").replace(/\s+/g, "").trim();
-  return limpio(kino.config.get("anilistToken1")) +
-         limpio(kino.config.get("anilistToken2")) +
-         limpio(kino.config.get("anilistToken3"));
+  return limpio(objeto.anilistToken1) +
+         limpio(objeto.anilistToken2) +
+         limpio(objeto.anilistToken3);
+}
+
+// Une el token desde la configuración guardada.
+function tokenAniList() {
+  return unirToken({
+    anilistToken1: kino.config.get("anilistToken1"),
+    anilistToken2: kino.config.get("anilistToken2"),
+    anilistToken3: kino.config.get("anilistToken3")
+  });
+}
+
+// Prueba el token contra AniList. Devuelve el nombre del usuario si sirve.
+// Lanza con el detalle si AniList lo rechaza.
+async function probarTokenAniList(token) {
+  await null;
+  const r = await fetchJson("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token },
+    body: { json: { query: "query { Viewer { name } }", variables: {} } }
+  });
+  const nombre = r && r.data && r.data.Viewer && r.data.Viewer.name;
+  if (!nombre) throw new Error("token sin usuario");
+  return nombre;
 }
 
 // ---------- resolver qué anime es ----------
@@ -202,10 +225,10 @@ export async function track(event) {
         kino.log("anilist: actualizado, episodio", progreso === null ? "-" : progreso);
       } catch (e) {
         resultado.anilist = false;
-        const porque = String(e.status || e.code || e.message).slice(0, 100);
+        const porque = String(e.message || e.status || e.code).slice(0, 180);
         kino.log("anilist falló:", porque);
-        throw kino.error("unavailable", "anilist " + porque,
-          { userMessage: "AniList respondió " + porque.slice(0, 30) + ". Se reintenta luego." });
+        throw kino.error("unavailable", "anilist " + porque.slice(0, 100),
+          { userMessage: "AniList rechazó la actualización. Revisa el registro." });
       }
     }
     if (anime.mal && malListo) {
@@ -233,6 +256,32 @@ export async function track(event) {
   }
 }
 
+// ---------- validar antes de guardar (apiVersion 6) ----------
+
+// Al guardar la configuración, el token unido se prueba contra AniList:
+// si AniList lo acepta, se guarda; si lo rechaza, Kino muestra el error
+// justo debajo del campo y no guarda.
+export async function validateSettings(values) {
+  await null;
+  const token = unirToken(values);
+  const mal = values.malClientId && values.malRefreshToken;
+  if (!token && !mal) return null;
+  if (token) {
+    try {
+      const nombre = await probarTokenAniList(token);
+      kino.log("validación: token de AniList correcto, usuario", nombre);
+      return null;
+    } catch (e) {
+      const porque = String(e.status || e.message || "sin detalle");
+      kino.log("validación: AniList rechazó el token:", porque.slice(0, 120));
+      return {
+        anilistToken1: "AniList rechazó este token: revisa que las 3 partes estén completas, en orden y sin caracteres de más."
+      };
+    }
+  }
+  return null;
+}
+
 // ---------- estado en la pestaña de ajustes ----------
 
 // La línea "Conexión" de Ajustes: qué cuentas están listas.
@@ -240,5 +289,5 @@ export async function settingsStatus() {
   await null;
   const anilist = tokenAniList() ? "AniList ✓" : "AniList —";
   const mal = kino.config.get("malClientId") && kino.config.get("malRefreshToken") ? "MyAnimeList ✓" : "MyAnimeList —";
-  return { text: anilist + "  ·  " + mal };
+  return { estado: anilist + "  ·  " + mal };
 }
