@@ -127,6 +127,14 @@ async function enMAL(malId, { progress, status }) {
   if (!r.ok) throw new Error("MAL respondió " + r.status);
 }
 
+// El token de AniList supera los 500 caracteres máximos de un campo de
+// ajustes, así que se pega partido en tres: aquí se vuelve a unir.
+function tokenAniList() {
+  return ((kino.config.get("anilistToken1") || "") +
+          (kino.config.get("anilistToken2") || "") +
+          (kino.config.get("anilistToken3") || "")).trim();
+}
+
 // ---------- track (la capability "tracking") ----------
 
 // Solo se actúa en dos momentos: "start" (marcar como viendo) y "watched"
@@ -134,7 +142,7 @@ async function enMAL(malId, { progress, status }) {
 // Los demás tipos de evento se ignoran sin error.
 export async function track(event) {
   await null;
-  const anilistToken = kino.config.get("anilistToken");
+  const anilistToken = tokenAniList();
   const malClientId = kino.config.get("malClientId");
   if (!anilistToken && !malClientId) {
     throw kino.error("auth_required", "configura tus tokens en Ajustes");
@@ -187,7 +195,7 @@ export async function track(event) {
 // La línea "Conexión" de Ajustes: qué cuentas están listas.
 export async function settingsStatus() {
   await null;
-  const anilist = kino.config.get("anilistToken") ? "AniList ✓" : "AniList —";
+  const anilist = tokenAniList() ? "AniList ✓" : "AniList —";
   const mal = kino.config.get("malClientId") && kino.config.get("malRefreshToken") ? "MyAnimeList ✓" : "MyAnimeList —";
   return { text: anilist + "  ·  " + mal };
 }
