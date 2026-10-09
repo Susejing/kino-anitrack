@@ -1,7 +1,7 @@
 {
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 7,
   "entry": "plugin.js",
   "description": "Actualiza tu progreso de anime en AniList y MyAnimeList cada vez que terminas un episodio o una película, sin importar desde qué fuente lo reproduzcas en Kino.",
@@ -9,7 +9,9 @@
   "capabilities": ["tracking"],
   "settings": [
     { "key": "cuentas", "label": "Tus cuentas", "type": "section", "hint": "Pega tus tokens de AniList y MyAnimeList. Los tokens nunca salen de este aparato más que hacia cada servicio. Kino te pedirá confirmar en rojo que este plugin puede ver lo que reproduces: es lo que permite marcar tu progreso." },
-    { "key": "anilistToken", "label": "Token de AniList", "type": "password", "hint": "Pégalo desde anilist.co (consulta el README del plugin para crearlo)" },
+    { "key": "anilistToken1", "label": "Token de AniList (parte 1)", "type": "password", "hint": "El token de AniList es muy largo: pégalo partido en estas tres partes, en orden (ver README)" },
+    { "key": "anilistToken2", "label": "Token de AniList (parte 2)", "type": "password" },
+    { "key": "anilistToken3", "label": "Token de AniList (parte 3)", "type": "password" },
     { "key": "malClientId", "label": "Client ID de MyAnimeList", "type": "text", "hint": "De tu app en myanimelist.net/apiconfig" },
     { "key": "malClientSecret", "label": "Client Secret de MyAnimeList", "type": "password" },
     { "key": "malRefreshToken", "label": "Refresh Token de MyAnimeList", "type": "password", "hint": "Se renueva solo; el plugin lo usa para pedir tokens nuevos" },
