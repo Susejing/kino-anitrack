@@ -1,7 +1,7 @@
 {
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "apiVersion": 7,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -16,7 +16,8 @@
     { "key": "anilistToken3", "label": "Token de AniList (parte 3)", "type": "password" },
     { "key": "malClientId", "label": "Client ID de MyAnimeList", "type": "text", "hint": "De tu app en myanimelist.net/apiconfig" },
     { "key": "malClientSecret", "label": "Client Secret de MyAnimeList", "type": "password" },
-    { "key": "malRefreshToken", "label": "Refresh Token de MyAnimeList", "type": "password", "hint": "Se renueva solo; el plugin lo usa para pedir tokens nuevos" },
+    { "key": "malRefreshToken1", "label": "Refresh Token de MAL (parte 1)", "type": "password", "hint": "Pega el token partido en dos partes, en orden" },
+    { "key": "malRefreshToken2", "label": "Refresh Token de MAL (parte 2)", "type": "password" },
     { "key": "estado", "label": "Conexión", "type": "status" }
   ]
 }
