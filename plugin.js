@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.4";
+const VERSION = "0.2.5";
 
 // ---------- utilidades ----------
 
@@ -151,20 +151,24 @@ async function enAniList(token, { anilistId, progress, status }) {
 // ---------- MyAnimeList ----------
 
 // El token de MAL vence (31 días): con el refresh token y las credenciales de
-// tu app se renueva solo. El token fresco se guarda en kino.storage.
+// tu app se renueva solo. MAL rota su refresh token en cada renovación (el
+// viejo deja de servir): el nuevo se guarda y se prefiere sobre el original.
 async function malToken() {
   await null;
   const guardado = kino.storage.get("malAccessToken");
   if (guardado) return guardado;
+  const refreshToken = kino.storage.get("malRefreshTokenRotado") || kino.config.get("malRefreshToken");
   const r = await fetchJson("https://api.myanimelist.net/v2/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: "grant_type=refresh_token&client_id=" + encodeURIComponent(kino.config.get("malClientId")) +
       "&client_secret=" + encodeURIComponent(kino.config.get("malClientSecret")) +
-      "&refresh_token=" + encodeURIComponent(kino.config.get("malRefreshToken"))
+      "&refresh_token=" + encodeURIComponent(refreshToken)
   });
   if (!r.access_token) throw new Error("MAL no devolvió token");
-  // Se renueva un poco antes del vencimiento real.
+  // Se guarda también el refresh token nuevo que entrega MAL en cada
+  // renovación, y el token de acceso se renueva antes del vencimiento real.
+  if (r.refresh_token) kino.storage.set("malRefreshTokenRotado", r.refresh_token, 2500000000);
   kino.storage.set("malAccessToken", r.access_token, Math.min((r.expires_in || 2678400) - 86400, 2500000000));
   return r.access_token;
 }
