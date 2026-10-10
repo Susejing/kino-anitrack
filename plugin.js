@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.5";
+const VERSION = "0.2.6";
 
 // ---------- utilidades ----------
 
@@ -61,6 +61,13 @@ function tokenAniList() {
     anilistToken2: kino.config.get("anilistToken2"),
     anilistToken3: kino.config.get("anilistToken3")
   });
+}
+
+// El refresh token de MAL también supera los 500 caracteres: se divide en dos.
+function tokenMAL() {
+  const limpio = (s) => String(s || "").replace(/\s+/g, "").trim();
+  return limpio(kino.config.get("malRefreshToken1")) +
+         limpio(kino.config.get("malRefreshToken2"));
 }
 
 // Prueba el token contra AniList. Devuelve el nombre del usuario si sirve.
@@ -157,7 +164,7 @@ async function malToken() {
   await null;
   const guardado = kino.storage.get("malAccessToken");
   if (guardado) return guardado;
-  const refreshToken = kino.storage.get("malRefreshTokenRotado") || kino.config.get("malRefreshToken");
+  const refreshToken = kino.storage.get("malRefreshTokenRotado") || tokenMAL();
   const r = await fetchJson("https://api.myanimelist.net/v2/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -207,7 +214,7 @@ export async function track(event) {
   await null;
   if (event.type !== "watched") return { ok: true };
   const anilistToken = tokenAniList();
-  const malListo = kino.config.get("malClientId") && kino.config.get("malRefreshToken");
+  const malListo = kino.config.get("malClientId") && tokenMAL();
   if (!anilistToken && !malListo) {
     throw kino.error("auth_required", "configura tus tokens en Ajustes");
   }
@@ -300,6 +307,6 @@ export async function validateSettings(values) {
 export async function settingsStatus() {
   await null;
   const anilist = tokenAniList() ? "AniList ✓" : "AniList —";
-  const mal = kino.config.get("malClientId") && kino.config.get("malRefreshToken") ? "MyAnimeList ✓" : "MyAnimeList —";
+  const mal = kino.config.get("malClientId") && tokenMAL() ? "MyAnimeList ✓" : "MyAnimeList —";
   return { estado: anilist + "  ·  " + mal };
 }
