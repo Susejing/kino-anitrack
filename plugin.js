@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.6";
+const VERSION = "0.2.7";
 
 // ---------- utilidades ----------
 
@@ -165,7 +165,7 @@ async function malToken() {
   const guardado = kino.storage.get("malAccessToken");
   if (guardado) return guardado;
   const refreshToken = kino.storage.get("malRefreshTokenRotado") || tokenMAL();
-  const r = await fetchJson("https://api.myanimelist.net/v2/oauth2/token", {
+  const r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: "grant_type=refresh_token&client_id=" + encodeURIComponent(kino.config.get("malClientId")) +
