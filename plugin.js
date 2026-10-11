@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.7";
+const VERSION = "0.2.8";
 
 // ---------- utilidades ----------
 
@@ -92,8 +92,36 @@ async function probarTokenAniList(token) {
 async function resolverAnime(ids, title) {
   await null;
   if (ids && (ids.anilist || ids.mal)) {
-    kino.log("resolver: ids directos de Kino");
-    return { anilist: ids.anilist, mal: ids.mal };
+    let a = ids.anilist || null;
+    let m = ids.mal || null;
+    // Si Kino trae solo uno de los dos ids, completar el que falta con una
+    // consulta barata a AniList (Media tiene tanto id como idMal).
+    if (a && !m) {
+      try {
+        const r = await fetchJson("https://graphql.anilist.co", {
+          method: "POST",
+          body: { json: { query: "query ($id: Int) { Media(id: $id) { id idMal } }", variables: { id: a } } }
+        });
+        if (r.data && r.data.Media) m = r.data.Media.idMal || null;
+        kino.log("resolver: id de MAL completado:", m || "no encontrado");
+      } catch (e) {
+        kino.log("resolver: anilist por id falló:", String(e.status || e.code || e.message).slice(0, 120));
+      }
+    }
+    if (m && !a) {
+      try {
+        const r = await fetchJson("https://graphql.anilist.co", {
+          method: "POST",
+          body: { json: { query: "query ($idMal: Int) { Media(idMal: $idMal) { id } }", variables: { idMal: m } } }
+        });
+        if (r.data && r.data.Media) a = r.data.Media.id;
+        kino.log("resolver: id de AniList completado:", a || "no encontrado");
+      } catch (e) {
+        kino.log("resolver: anilist por idMal falló:", String(e.status || e.code || e.message).slice(0, 120));
+      }
+    }
+    kino.log("resolver: ids directos de Kino (anilist:", a, "mal:", m, ")");
+    return { anilist: a, mal: m };
   }
   if (ids && (ids.imdb || ids.tmdb)) {
     const q = new URLSearchParams({ sources: "anilist,mal" });
@@ -257,10 +285,15 @@ export async function track(event) {
           status: estado === "COMPLETED" ? "completed" : "watching"
         });
         kino.log("mal: actualizado, episodio", progreso);
+        try { kino.storage.set("malEstado", "ok", 2500000000); } catch (e2) { /* cache */ }
       } catch (e) {
         resultado.mal = false;
-        kino.log("mal falló:", String(e.status || e.code || e.message).slice(0, 120));
+        const porque = String(e.status || e.code || e.message).slice(0, 90);
+        kino.log("mal falló:", porque);
+        try { kino.storage.set("malEstado", "error " + porque, 2500000000); } catch (e2) { /* cache */ }
       }
+    } else if (malListo) {
+      kino.log("mal: sin id de MAL para este anime, omitido");
     }
     kino.log("track entregado:", event.type);
     return resultado;
@@ -303,10 +336,23 @@ export async function validateSettings(values) {
 
 // ---------- estado en la pestaña de ajustes ----------
 
-// La línea "Conexión" de Ajustes: qué cuentas están listas.
+// La línea "Conexión" de Ajustes: qué cuentas están listas y, si MAL falló
+// la última vez, el motivo exacto (para diagnosticar sin capturas).
 export async function settingsStatus() {
   await null;
   const anilist = tokenAniList() ? "AniList ✓" : "AniList —";
-  const mal = kino.config.get("malClientId") && tokenMAL() ? "MyAnimeList ✓" : "MyAnimeList —";
+  let mal;
+  if (!(kino.config.get("malClientId") && tokenMAL())) {
+    mal = "MyAnimeList —";
+  } else {
+    const estado = kino.storage.get("malEstado");
+    if (estado && estado.indexOf("error") === 0) {
+      mal = "MyAnimeList ⚠ " + estado.slice(6, 60);
+    } else if (estado === "ok") {
+      mal = "MyAnimeList ✓";
+    } else {
+      mal = "MyAnimeList ✓ (sin probar aún)";
+    }
+  }
   return { estado: anilist + "  ·  " + mal };
 }
