@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.2.8";
+const VERSION = "0.2.9";
 
 // ---------- utilidades ----------
 
@@ -185,19 +185,54 @@ async function enAniList(token, { anilistId, progress, status }) {
 
 // ---------- MyAnimeList ----------
 
+// El verificador PKCE: pareja fija del code_challenge del link de
+// autorización de MAL. El plugin lo usa para canjear el código solo.
+const MAL_VERIFIER = "Wy6~bfhephcek4z8A9NsmgdVH-Ie1wBEJsWknXoS~0Kn6Yqn5cWjEEkdu2LiBKfg";
+
 // El token de MAL vence (31 días): con el refresh token y las credenciales de
-// tu app se renueva solo. MAL rota su refresh token en cada renovación (el
-// viejo deja de servir): el nuevo se guarda y se prefiere sobre el original.
+// tu app se renueva solo. Primer uso: si la persona pegó el código de
+// autorización en Ajustes, se canjea aquí automáticamente por refresh token.
 async function malToken() {
   await null;
   const guardado = kino.storage.get("malAccessToken");
   if (guardado) return guardado;
-  const refreshToken = kino.storage.get("malRefreshTokenRotado") || tokenMAL();
+  const clientId = kino.config.get("malClientId");
+  const clientSecret = kino.config.get("malClientSecret");
+  let refreshToken = kino.storage.get("malRefreshTokenRotado") || tokenMAL();
+
+  // Canje del código de autorización: una sola vez. El refresh token que
+  // entrega MAL queda guardado; ya no hace falta ningún reqbin.
+  if (!refreshToken && kino.config.get("malCodigo")) {
+    const r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "grant_type=authorization_code&client_id=" + encodeURIComponent(clientId) +
+        "&client_secret=" + encodeURIComponent(clientSecret) +
+        "&code=" + encodeURIComponent(kino.config.get("malCodigo")) +
+        "&code_verifier=" + encodeURIComponent(MAL_VERIFIER)
+    });
+    if (r.access_token && r.refresh_token) {
+      try {
+        kino.storage.set("malRefreshTokenRotado", r.refresh_token, 2500000000);
+        kino.storage.set("malAccessToken", r.access_token, Math.min((r.expires_in || 2678400) - 86400, 2500000000));
+      } catch (e2) { /* cache llena */ }
+      return r.access_token;
+    }
+    const e = new Error(r.error ? "código rechazado: " + r.error : "canje sin token");
+    e.status = "canje";
+    throw e;
+  }
+
+  if (!refreshToken) {
+    const e = new Error("sin código ni refresh token de MAL");
+    e.status = "sin-credencial";
+    throw e;
+  }
   const r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "grant_type=refresh_token&client_id=" + encodeURIComponent(kino.config.get("malClientId")) +
-      "&client_secret=" + encodeURIComponent(kino.config.get("malClientSecret")) +
+    body: "grant_type=refresh_token&client_id=" + encodeURIComponent(clientId) +
+      "&client_secret=" + encodeURIComponent(clientSecret) +
       "&refresh_token=" + encodeURIComponent(refreshToken)
   });
   if (!r.access_token) throw new Error("MAL no devolvió token");
@@ -242,7 +277,7 @@ export async function track(event) {
   await null;
   if (event.type !== "watched") return { ok: true };
   const anilistToken = tokenAniList();
-  const malListo = kino.config.get("malClientId") && tokenMAL();
+  const malListo = kino.config.get("malClientId") && (tokenMAL() || kino.config.get("malCodigo"));
   if (!anilistToken && !malListo) {
     throw kino.error("auth_required", "configura tus tokens en Ajustes");
   }
@@ -342,7 +377,7 @@ export async function settingsStatus() {
   await null;
   const anilist = tokenAniList() ? "AniList ✓" : "AniList —";
   let mal;
-  if (!(kino.config.get("malClientId") && tokenMAL())) {
+  if (!(kino.config.get("malClientId") && (tokenMAL() || kino.config.get("malCodigo")))) {
     mal = "MyAnimeList —";
   } else {
     const estado = kino.storage.get("malEstado");
@@ -350,6 +385,8 @@ export async function settingsStatus() {
       mal = "MyAnimeList ⚠ " + estado.slice(6, 60);
     } else if (estado === "ok") {
       mal = "MyAnimeList ✓";
+    } else if (kino.config.get("malCodigo")) {
+      mal = "MyAnimeList ✓ (se activa con el primer episodio)";
     } else {
       mal = "MyAnimeList ✓ (sin probar aún)";
     }
