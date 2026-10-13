@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.3.2";
+const VERSION = "0.3.3";
 
 // ---------- utilidades ----------
 
@@ -224,10 +224,14 @@ async function malToken() {
       throw e2;
     }
     if (r.access_token && r.refresh_token) {
+      // El access token de MAL vive 1 hora: se cachea la mitad de su vida
+      // real (en milisegundos), con un mínimo de un minuto.
+      const ttl = Math.max(Math.floor((r.expires_in || 3600) * 1000 / 2), 60000);
       try {
         kino.storage.set("malRefreshTokenRotado", r.refresh_token, 2500000000);
-        kino.storage.set("malAccessToken", r.access_token, Math.min((r.expires_in || 2678400) - 86400, 2500000000));
+        kino.storage.set("malAccessToken", r.access_token, ttl);
       } catch (e2) { /* cache llena */ }
+      kino.log("mal: código canjeado, tokens guardados ✓");
       return r.access_token;
     }
     const e = new Error(r.error ? "código rechazado: " + r.error : "canje sin token");
@@ -240,18 +244,30 @@ async function malToken() {
     e.status = "sin-credencial";
     throw e;
   }
-  const r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: "grant_type=refresh_token&client_id=" + encodeURIComponent(clientId) +
-      "&client_secret=" + encodeURIComponent(clientSecret) +
-      "&refresh_token=" + encodeURIComponent(refreshToken)
-  });
+  let r;
+  try {
+    r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "grant_type=refresh_token&client_id=" + encodeURIComponent(clientId) +
+        "&client_secret=" + encodeURIComponent(clientSecret) +
+        "&refresh_token=" + encodeURIComponent(refreshToken)
+    });
+  } catch (e) {
+    const e2 = new Error(e.message.indexOf("401") >= 0
+      ? "renovación rechazada (Client ID o Secret incorrectos)"
+      : "renovación falló: " + e.message);
+    e2.status = e2.message;
+    throw e2;
+  }
   if (!r.access_token) throw new Error("MAL no devolvió token");
   // Se guarda también el refresh token nuevo que entrega MAL en cada
-  // renovación, y el token de acceso se renueva antes del vencimiento real.
-  if (r.refresh_token) kino.storage.set("malRefreshTokenRotado", r.refresh_token, 2500000000);
-  kino.storage.set("malAccessToken", r.access_token, Math.min((r.expires_in || 2678400) - 86400, 2500000000));
+  // renovación, y el token de acceso se cachea la mitad de su vida real.
+  const ttl = Math.max(Math.floor((r.expires_in || 3600) * 1000 / 2), 60000);
+  try {
+    if (r.refresh_token) kino.storage.set("malRefreshTokenRotado", r.refresh_token, 2500000000);
+    kino.storage.set("malAccessToken", r.access_token, ttl);
+  } catch (e2) { /* cache llena */ }
   return r.access_token;
 }
 
@@ -263,7 +279,6 @@ async function enMAL(malId, { progress, status }) {
       method: "PUT",
       headers: {
         Authorization: "Bearer " + token,
-        "X-MAL-CLIENT-ID": kino.config.get("malClientId"),
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body
@@ -274,7 +289,15 @@ async function enMAL(malId, { progress, status }) {
     kino.storage.remove("malAccessToken");
     r = await enviar(await malToken());
   }
-  if (!r.ok) throw new Error("MAL respondió " + r.status);
+  if (!r.ok) {
+    // MAL explica su rechazo en el cuerpo: se guarda literal para la
+    // línea de Conexión (dice la causa exacta, no solo el número).
+    let detalle = "";
+    try { detalle = (r.text() || "").slice(0, 80); } catch (e2) { /* sin cuerpo */ }
+    const e = new Error("MAL respondió " + r.status + " " + detalle);
+    e.status = "lista " + r.status + " " + detalle.slice(0, 40);
+    throw e;
+  }
 }
 
 // ---------- track (la capability "tracking") ----------
@@ -398,11 +421,36 @@ export async function settingsStatus() {
       mal = "MyAnimeList ⚠ " + estado.slice(6, 55) + " (ID " + idCorto + ")";
     } else if (estado === "ok") {
       mal = "MyAnimeList ✓";
-    } else if (codigoMAL()) {
-      mal = "MyAnimeList ✓ (se activa con el primer episodio)";
     } else {
-      mal = "MyAnimeList ✓ (sin probar aún)";
+      mal = "MyAnimeList ✓ (se activa con el primer episodio)";
     }
   }
   return { estado: anilist + "  ·  " + mal };
+}
+
+// El botón "Probar MyAnimeList" de Ajustes: canjea el código si hace
+// falta, pide el usuario conectado a MAL y devuelve el veredicto.
+export async function action(key) {
+  await null;
+  if (key !== "probarMal") return null;
+  try {
+    const token = await malToken();
+    const r = await kino.fetch("https://api.myanimelist.net/v2/users/@me", {
+      headers: { Authorization: "Bearer " + token }
+    });
+    if (!r.ok) {
+      let d = "";
+      try { d = (r.text() || "").slice(0, 60); } catch (e2) { /* sin cuerpo */ }
+      try { kino.storage.set("malEstado", "error @me " + r.status + " " + d, 2500000000); } catch (e3) { /* cache */ }
+      return { message: "MyAnimeList respondió " + r.status + ": " + d };
+    }
+    const j = r.json();
+    try { kino.storage.set("malEstado", "ok", 2500000000); } catch (e3) { /* cache */ }
+    kino.log("mal: prueba OK, usuario:", j && j.name);
+    return { message: "✓ Conectado a MyAnimeList como: " + ((j && j.name) || (j && j.id) || "tu usuario") };
+  } catch (e) {
+    const porque = String(e.status || e.code || e.message).slice(0, 150);
+    try { kino.storage.set("malEstado", "error " + porque.slice(0, 60), 2500000000); } catch (e3) { /* cache */ }
+    return { message: "Falló la prueba: " + porque };
+  }
 }
