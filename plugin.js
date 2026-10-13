@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.3.4";
+const VERSION = "0.3.5";
 
 // ---------- utilidades ----------
 
@@ -206,9 +206,9 @@ async function malToken() {
   if (!refreshToken && codigoMAL()) {
     let r;
     try {
-      // Cuerpo como formulario nativo del kit: { form: {...} } viaja como
-      // application/x-www-form-urlencoded de verdad, y MAL recibe los
-      // parámetros (el cuerpo tipo string nunca llegó completo).
+      // Cuerpo como formulario nativo del kit. SIN redirect_uri: según la
+      // documentación de MAL, si la autorización no lo incluyó (nuestro
+      // caso: una sola URL registrada), el canje debe omitirlo también.
       r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
         method: "POST",
         body: { form: {
@@ -216,7 +216,6 @@ async function malToken() {
           client_id: clientId,
           client_secret: clientSecret,
           code: codigoMAL(),
-          redirect_uri: "https://example.com",
           code_verifier: MAL_VERIFIER
         } }
       });
