@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 
 // ---------- utilidades ----------
 
@@ -186,8 +186,8 @@ async function enAniList(token, { anilistId, progress, status }) {
 
 // ---------- MyAnimeList ----------
 
-// El verificador PKCE: pareja fija del code_challenge del link de
-// autorización de MAL. El plugin lo usa para canjear el código solo.
+// El verificador PKCE de MAL: el reto del link de autorización es ESTE
+// MISMO texto (MAL solo soporta el método "plain": reto = verificador).
 const MAL_VERIFIER = "Wy6~bfhephcek4z8A9NsmgdVH-Ie1wBEJsWknXoS~0Kn6Yqn5cWjEEkdu2LiBKfg";
 
 // El token de MAL vence (31 días): con el refresh token y las credenciales de
@@ -197,8 +197,8 @@ async function malToken() {
   await null;
   const guardado = kino.storage.get("malAccessToken");
   if (guardado) return guardado;
-  const clientId = kino.config.get("malClientId");
-  const clientSecret = kino.config.get("malClientSecret");
+  const clientId = String(kino.config.get("malClientId") || "").trim();
+  const clientSecret = String(kino.config.get("malClientSecret") || "").trim();
   let refreshToken = kino.storage.get("malRefreshTokenRotado");
 
   // Canje del código de autorización: una sola vez. El refresh token que
@@ -210,6 +210,7 @@ async function malToken() {
       body: "grant_type=authorization_code&client_id=" + encodeURIComponent(clientId) +
         "&client_secret=" + encodeURIComponent(clientSecret) +
         "&code=" + encodeURIComponent(codigoMAL()) +
+        "&redirect_uri=" + encodeURIComponent("https://example.com") +
         "&code_verifier=" + encodeURIComponent(MAL_VERIFIER)
     });
     if (r.access_token && r.refresh_token) {
