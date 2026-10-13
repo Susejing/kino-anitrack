@@ -1,7 +1,7 @@
 {
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "apiVersion": 7,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -18,6 +18,7 @@
     { "key": "malClientSecret", "label": "Client Secret de MyAnimeList", "type": "password" },
     { "key": "malCodigo1", "label": "Código de MAL (parte 1)", "type": "text", "hint": "Pega el ?code= de example.com partido en dos partes, en orden" },
     { "key": "malCodigo2", "label": "Código de MAL (parte 2)", "type": "text" },
+    { "key": "probarMal", "label": "Probar MyAnimeList", "type": "action" },
     { "key": "estado", "label": "Conexión", "type": "status" }
   ]
 }
