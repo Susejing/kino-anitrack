@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 
 // ---------- utilidades ----------
 
@@ -204,15 +204,25 @@ async function malToken() {
   // Canje del código de autorización: una sola vez. El refresh token que
   // entrega MAL queda guardado; ya no hace falta ningún reqbin.
   if (!refreshToken && codigoMAL()) {
-    const r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "grant_type=authorization_code&client_id=" + encodeURIComponent(clientId) +
-        "&client_secret=" + encodeURIComponent(clientSecret) +
-        "&code=" + encodeURIComponent(codigoMAL()) +
-        "&redirect_uri=" + encodeURIComponent("https://example.com") +
-        "&code_verifier=" + encodeURIComponent(MAL_VERIFIER)
-    });
+    let r;
+    try {
+      r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "grant_type=authorization_code&client_id=" + encodeURIComponent(clientId) +
+          "&client_secret=" + encodeURIComponent(clientSecret) +
+          "&code=" + encodeURIComponent(codigoMAL()) +
+          "&redirect_uri=" + encodeURIComponent("https://example.com") +
+          "&code_verifier=" + encodeURIComponent(MAL_VERIFIER)
+      });
+    } catch (e) {
+      // MAL responde 401 cuando no reconoce la pareja Client ID + Secret.
+      const e2 = new Error(e.message.indexOf("401") >= 0
+        ? "Client ID o Secret incorrectos (revisa apiconfig)"
+        : "canje falló: " + e.message);
+      e2.status = e2.message;
+      throw e2;
+    }
     if (r.access_token && r.refresh_token) {
       try {
         kino.storage.set("malRefreshTokenRotado", r.refresh_token, 2500000000);
@@ -221,7 +231,7 @@ async function malToken() {
       return r.access_token;
     }
     const e = new Error(r.error ? "código rechazado: " + r.error : "canje sin token");
-    e.status = "canje";
+    e.status = "código rechazado: " + (r.error || "sin respuesta") + " (venció o ya se usó)";
     throw e;
   }
 
@@ -383,8 +393,9 @@ export async function settingsStatus() {
     mal = "MyAnimeList —";
   } else {
     const estado = kino.storage.get("malEstado");
+    const idCorto = String(kino.config.get("malClientId") || "").slice(0, 8);
     if (estado && estado.indexOf("error") === 0) {
-      mal = "MyAnimeList ⚠ " + estado.slice(6, 60);
+      mal = "MyAnimeList ⚠ " + estado.slice(6, 55) + " (ID " + idCorto + ")";
     } else if (estado === "ok") {
       mal = "MyAnimeList ✓";
     } else if (codigoMAL()) {
