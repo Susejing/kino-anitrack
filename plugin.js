@@ -5,7 +5,7 @@
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.3.3";
+const VERSION = "0.3.4";
 
 // ---------- utilidades ----------
 
@@ -206,20 +206,25 @@ async function malToken() {
   if (!refreshToken && codigoMAL()) {
     let r;
     try {
+      // Cuerpo como formulario nativo del kit: { form: {...} } viaja como
+      // application/x-www-form-urlencoded de verdad, y MAL recibe los
+      // parámetros (el cuerpo tipo string nunca llegó completo).
       r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "grant_type=authorization_code&client_id=" + encodeURIComponent(clientId) +
-          "&client_secret=" + encodeURIComponent(clientSecret) +
-          "&code=" + encodeURIComponent(codigoMAL()) +
-          "&redirect_uri=" + encodeURIComponent("https://example.com") +
-          "&code_verifier=" + encodeURIComponent(MAL_VERIFIER)
+        body: { form: {
+          grant_type: "authorization_code",
+          client_id: clientId,
+          client_secret: clientSecret,
+          code: codigoMAL(),
+          redirect_uri: "https://example.com",
+          code_verifier: MAL_VERIFIER
+        } }
       });
     } catch (e) {
       // MAL responde 401 cuando no reconoce la pareja Client ID + Secret.
       const e2 = new Error(e.message.indexOf("401") >= 0
         ? "Client ID o Secret incorrectos (revisa apiconfig)"
-        : "canje falló: " + e.message);
+        : "canje falló: " + e.message.slice(0, 120));
       e2.status = e2.message;
       throw e2;
     }
@@ -248,10 +253,12 @@ async function malToken() {
   try {
     r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "grant_type=refresh_token&client_id=" + encodeURIComponent(clientId) +
-        "&client_secret=" + encodeURIComponent(clientSecret) +
-        "&refresh_token=" + encodeURIComponent(refreshToken)
+      body: { form: {
+        grant_type: "refresh_token",
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken
+      } }
     });
   } catch (e) {
     const e2 = new Error(e.message.indexOf("401") >= 0
@@ -274,14 +281,10 @@ async function malToken() {
 async function enMAL(malId, { progress, status }) {
   await null;
   const enviar = async (token) => {
-    const body = "num_watched_episodes=" + progress + "&status=" + status;
     return kino.fetch("https://api.myanimelist.net/v2/anime/" + malId + "/my_list_status", {
       method: "PUT",
-      headers: {
-        Authorization: "Bearer " + token,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body
+      headers: { Authorization: "Bearer " + token },
+      body: { form: { num_watched_episodes: progress, status: status } }
     });
   };
   let r = await enviar(await malToken());
@@ -449,7 +452,7 @@ export async function action(key) {
     kino.log("mal: prueba OK, usuario:", j && j.name);
     return { message: "✓ Conectado a MyAnimeList como: " + ((j && j.name) || (j && j.id) || "tu usuario") };
   } catch (e) {
-    const porque = String(e.status || e.code || e.message).slice(0, 150);
+    const porque = String(e.status || e.code || e.message).slice(0, 250);
     try { kino.storage.set("malEstado", "error " + porque.slice(0, 60), 2500000000); } catch (e3) { /* cache */ }
     return { message: "Falló la prueba: " + porque };
   }
