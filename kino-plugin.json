@@ -1,10 +1,11 @@
 {
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "apiVersion": 7,
   "entry": "plugin.js",
   "icon": "icon.png",
+  "color": "#A855F7",
   "description": "Actualiza tu progreso de anime en AniList y MyAnimeList cada vez que terminas un episodio o una película, sin importar desde qué fuente lo reproduzcas en Kino.",
   "hosts": ["graphql.anilist.co", "api.myanimelist.net", "myanimelist.net", "arm.haglund.dev"],
   "capabilities": ["tracking"],
