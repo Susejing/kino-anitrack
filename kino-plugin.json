@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "creator": "Susejing",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "apiVersion": 12,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -10,7 +10,7 @@
   "hosts": ["graphql.anilist.co", "api.myanimelist.net", "myanimelist.net", "arm.haglund.dev"],
   "capabilities": ["tracking"],
   "secrets": {
-    "malClientSecret": "kino-sealed:v1:RXIFQYxMlDEQj0RArBo8ofW_albcfyLygGUdbfp7DCJuXE4ZI-8QNehsHvbVYJz1zCeiqt2Sbuc9BDdOPB_zgPg498-aLCamzcs4UMO-i7R_fZKiryb6zztTWdfYouLw7aYe771CGqTSxiS4sHC_Cpk99xm-bX268JOv3w"
+    "malClientSecret": "kino-sealed:v1:hyTvfuIP8mL4l2l3jYCae65zAl5FAuc9TUoeqx2AwzZ1-o0IwOxtk8NDeIaoH1trlf1Duvb1ggcPcsfOT32gNrVQ2u-4xU7v-EiJB7GoMz-ZGPnoO1i_5CafgL-EfL6HiP_oXHHoD_8ZzAEecsg2HDHNd7y2ls9C3SnX6A"
   },
   "debug": true,
   "settings": [
