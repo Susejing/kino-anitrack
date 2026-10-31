@@ -3,9 +3,19 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.5.0: iniciar sesión es un botón y una pegada. AniList y MAL no ofrecen
+// el flujo "introduce un código en la TV", y un plugin no puede recibir la
+// respuesta del navegador: el mínimo físico posible es tocar el botón,
+// autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.3.5";
+const VERSION = "0.5.0";
+
+// El Client ID de la app de MyAnimeList del AUTOR (la misma del botón
+// "Iniciar sesión con MyAnimeList"). Es público: viaja en la URL de
+// autorización. Su Client Secret va SELLADO en el manifiesto y solo Kino
+// puede abrirlo: ninguna persona necesita registrar su propia app.
+const MAL_CLIENT_ID_AUTOR = "97f502c0298629346c51608fc477e0f7";
 
 // ---------- utilidades ----------
 
@@ -45,8 +55,36 @@ function yaEntregado(id) {
   return false;
 }
 
-// El token de AniList supera los 500 caracteres máximos de un campo de
-// ajustes, así que se pega partido en tres: aquí se vuelve a unir.
+// Saca el token de AniList de una dirección pegada. Tras autorizar, el
+// navegador queda en https://example.com/#access_token=...&token_type=...
+function tokenAniListDeUrl(direccion) {
+  const s = String(direccion || "").trim();
+  if (!s) return "";
+  const i = s.indexOf("access_token=");
+  if (i < 0) return "";
+  let t = s.slice(i + "access_token=".length);
+  const fin = t.indexOf("&");
+  if (fin >= 0) t = t.slice(0, fin);
+  return t.replace(/\s+/g, "");
+}
+
+// Saca el código de MAL de una dirección pegada: tras autorizar, el navegador
+// queda en https://example.com/?code=ALGO. Busca "code=" con delimitador para
+// no confundirlo con "code_challenge" del propio link de autorización.
+function codigoMALDeUrl(direccion) {
+  const s = String(direccion || "").trim();
+  if (!s) return "";
+  const i = s.search(/[?#&]code=/);
+  if (i < 0) return "";
+  let c = s.slice(s.indexOf("=", i) + 1);
+  const fin = c.indexOf("&");
+  if (fin >= 0) c = c.slice(0, fin);
+  return c.replace(/\s+/g, "");
+}
+
+// El token de AniList en el método antiguo superaba los 500 caracteres
+// máximos de un campo de ajustes, así que se pegaba partido en tres: aquí se
+// vuelve a unir.
 function unirToken(objeto) {
   const limpio = (s) => String(s || "").replace(/\s+/g, "").trim();
   return limpio(objeto.anilistToken1) +
@@ -54,8 +92,11 @@ function unirToken(objeto) {
          limpio(objeto.anilistToken3);
 }
 
-// Une el token desde la configuración guardada.
+// Token de AniList: primero la dirección pegada (método nuevo), y si no,
+// las tres partes del método antiguo.
 function tokenAniList() {
+  const deUrl = tokenAniListDeUrl(kino.config.get("anilistUrl"));
+  if (deUrl) return deUrl;
   return unirToken({
     anilistToken1: kino.config.get("anilistToken1"),
     anilistToken2: kino.config.get("anilistToken2"),
@@ -63,12 +104,34 @@ function tokenAniList() {
   });
 }
 
-// El código de autorización de MAL supera los 500 caracteres: se divide en
-// dos partes que se unen aquí.
+// Código de MAL: primero la dirección pegada (método nuevo), y si no, las
+// dos partes del método antiguo.
 function codigoMAL() {
+  const deUrl = codigoMALDeUrl(kino.config.get("malUrl"));
+  if (deUrl) return deUrl;
   const limpio = (s) => String(s || "").replace(/\s+/g, "").trim();
   return limpio(kino.config.get("malCodigo1")) +
          limpio(kino.config.get("malCodigo2"));
+}
+
+// Credenciales de MAL: si la persona llenó las suyas del método antiguo,
+// esas ganan; si no, la app del autor: client id público + client secret
+// sellado en el manifiesto (kino.secret entrega un marcador que Kino
+// cambia por el valor real justo antes de enviar la petición).
+function credencialesMAL() {
+  const id = String(kino.config.get("malClientId") || "").trim();
+  const sec = String(kino.config.get("malClientSecret") || "").trim();
+  if (id && sec) return { clientId: id, clientSecret: sec };
+  // El client id de MAL es hexadecimal (letras y números): si el marcador
+  // de posición siguiera ahí (trae guiones bajos), la app del autor aún no
+  // estaría configurada y MAL quedaría apagado sin dar error.
+  if (/^[0-9a-fA-F]+$/.test(MAL_CLIENT_ID_AUTOR)) {
+    try {
+      const sello = kino.secret("malClientSecret");
+      if (sello) return { clientId: MAL_CLIENT_ID_AUTOR, clientSecret: sello };
+    } catch (e) { /* sin secreto sellado: MAL queda apagado */ }
+  }
+  return null;
 }
 
 // Prueba el token contra AniList. Devuelve el nombre del usuario si sirve.
@@ -190,15 +253,19 @@ async function enAniList(token, { anilistId, progress, status }) {
 // MISMO texto (MAL solo soporta el método "plain": reto = verificador).
 const MAL_VERIFIER = "Wy6~bfhephcek4z8A9NsmgdVH-Ie1wBEJsWknXoS~0Kn6Yqn5cWjEEkdu2LiBKfg";
 
-// El token de MAL vence (31 días): con el refresh token y las credenciales de
-// tu app se renueva solo. Primer uso: si la persona pegó el código de
-// autorización en Ajustes, se canjea aquí automáticamente por refresh token.
+// El token de MAL vence (31 días): con el refresh token se renueva solo.
+// Primer uso: si la persona pegó la dirección con el código de autorización
+// en Ajustes, se canjea aquí automáticamente por refresh token.
 async function malToken() {
   await null;
   const guardado = kino.storage.get("malAccessToken");
   if (guardado) return guardado;
-  const clientId = String(kino.config.get("malClientId") || "").trim();
-  const clientSecret = String(kino.config.get("malClientSecret") || "").trim();
+  const cred = credencialesMAL();
+  if (!cred) {
+    const e = new Error("MAL sin sesión: toca el botón de Ajustes");
+    e.status = "sin-credencial";
+    throw e;
+  }
   let refreshToken = kino.storage.get("malRefreshTokenRotado");
 
   // Canje del código de autorización: una sola vez. El refresh token que
@@ -209,20 +276,23 @@ async function malToken() {
       // Cuerpo como formulario nativo del kit. SIN redirect_uri: según la
       // documentación de MAL, si la autorización no lo incluyó (nuestro
       // caso: una sola URL registrada), el canje debe omitirlo también.
+      // El client secret puede ser el marcador del secreto sellado: Kino
+      // lo cambia por el valor real antes de que la petición salga.
       r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
         method: "POST",
         body: { form: {
           grant_type: "authorization_code",
-          client_id: clientId,
-          client_secret: clientSecret,
+          client_id: cred.clientId,
+          client_secret: cred.clientSecret,
           code: codigoMAL(),
           code_verifier: MAL_VERIFIER
         } }
       });
     } catch (e) {
-      // MAL responde 401 cuando no reconoce la pareja Client ID + Secret.
+      // MAL responde 401 cuando el código venció, ya se usó, o la pareja
+      // Client ID + Secret no es la de la app que autorizó.
       const e2 = new Error(e.message.indexOf("401") >= 0
-        ? "Client ID o Secret incorrectos (revisa apiconfig)"
+        ? "el código venció o ya se usó: autoriza de nuevo y pega la dirección nueva"
         : "canje falló: " + e.message.slice(0, 120));
       e2.status = e2.message;
       throw e2;
@@ -254,14 +324,14 @@ async function malToken() {
       method: "POST",
       body: { form: {
         grant_type: "refresh_token",
-        client_id: clientId,
-        client_secret: clientSecret,
+        client_id: cred.clientId,
+        client_secret: cred.clientSecret,
         refresh_token: refreshToken
       } }
     });
   } catch (e) {
     const e2 = new Error(e.message.indexOf("401") >= 0
-      ? "renovación rechazada (Client ID o Secret incorrectos)"
+      ? "renovación rechazada (inicia sesión de nuevo)"
       : "renovación falló: " + e.message);
     e2.status = e2.message;
     throw e2;
@@ -314,14 +384,15 @@ export async function track(event) {
   await null;
   if (event.type !== "watched") return { ok: true };
   const anilistToken = tokenAniList();
-  const malListo = kino.config.get("malClientId") && codigoMAL();
+  const cred = credencialesMAL();
+  const malListo = !!(cred && codigoMAL());
   if (!anilistToken && !malListo) {
-    throw kino.error("auth_required", "configura tus tokens en Ajustes");
+    throw kino.error("auth_required", "inicia sesión en Ajustes");
   }
   if (yaEntregado(event.id)) return { ok: true };
 
   const ids = event.kind === "episode" ? (event.show && event.show.ids) || {} : event.ids || {};
-  const titulo = event.kind === "episode" ? (event.show && event.show.title) : event.title;
+  const titulo = event.kind === "episode" ? event.show && event.show.title : event.title;
 
   try {
     const anime = await resolverAnime(ids, titulo);
@@ -382,22 +453,42 @@ export async function track(event) {
 
 // ---------- validar antes de guardar (apiVersion 6) ----------
 
-// Al guardar la configuración, el token unido se prueba contra AniList:
-// si AniList lo acepta, se guarda; si lo rechaza, Kino muestra el error
-// justo debajo del campo y no guarda.
+// Al guardar la configuración se revisa lo pegado: la dirección de AniList
+// debe traer el token (y se prueba contra AniList al instante); la de MAL
+// debe traer el código (solo formato: el código es de un solo uso y el
+// canje lo hace "Probar conexión" o el primer episodio).
 export async function validateSettings(values) {
   await null;
-  const token = unirToken(values);
-  const mal = values.malClientId && values.malRefreshToken;
-  if (!token && !mal) return null;
-  if (token) {
+  const direccionAniList = String(values.anilistUrl || "").trim();
+  const tokenDeUrl = tokenAniListDeUrl(direccionAniList);
+  if (direccionAniList && !tokenDeUrl) {
+    return {
+      anilistUrl: "No veo el token en esa dirección. Copia la barra de direcciones del navegador justo después de autorizar y pégala aquí."
+    };
+  }
+  const direccionMal = String(values.malUrl || "").trim();
+  const codigoDeUrl = codigoMALDeUrl(direccionMal);
+  if (direccionMal && !codigoDeUrl) {
+    return {
+      malUrl: "No veo el código en esa dirección. Copia la barra de direcciones del navegador justo después de autorizar y pégala aquí."
+    };
+  }
+  // Método antiguo: el token unido en tres partes, si la persona lo usa.
+  const tokenAntiguo = unirToken(values);
+  if (tokenDeUrl || tokenAntiguo) {
     try {
-      const nombre = await probarTokenAniList(token);
+      const nombre = await probarTokenAniList(tokenDeUrl || tokenAntiguo);
+      try { kino.storage.set("anilistNombre", nombre, 2500000000); } catch (e2) { /* cache */ }
       kino.log("validación: token de AniList correcto, usuario", nombre);
       return null;
     } catch (e) {
       const porque = String(e.status || e.message || "sin detalle");
       kino.log("validación: AniList rechazó el token:", porque.slice(0, 120));
+      if (tokenDeUrl) {
+        return {
+          anilistUrl: "AniList rechazó ese token: autoriza de nuevo con el botón y pega la dirección nueva."
+        };
+      }
       return {
         anilistToken1: "AniList rechazó este token: revisa que las 3 partes estén completas, en orden y sin caracteres de más."
       };
@@ -408,51 +499,89 @@ export async function validateSettings(values) {
 
 // ---------- estado en la pestaña de ajustes ----------
 
-// La línea "Conexión" de Ajustes: qué cuentas están listas y, si MAL falló
-// la última vez, el motivo exacto (para diagnosticar sin capturas).
+// La línea "Conexión" de Ajustes: con qué cuentas está la sesión y, si MAL
+// falló la última vez, el motivo exacto (para diagnosticar sin capturas).
 export async function settingsStatus() {
   await null;
-  const anilist = tokenAniList() ? "AniList ✓" : "AniList —";
-  let mal;
-  if (!(kino.config.get("malClientId") && codigoMAL())) {
-    mal = "MyAnimeList —";
-  } else {
+  let anilist = "AniList —";
+  if (tokenAniList()) {
+    let nombre = "";
+    try { nombre = kino.storage.get("anilistNombre") || ""; } catch (e) { /* cache */ }
+    anilist = nombre ? "AniList ✓ como " + nombre : "AniList ✓";
+  }
+  let mal = "MyAnimeList —";
+  const cred = credencialesMAL();
+  if (cred && codigoMAL()) {
     const estado = kino.storage.get("malEstado");
-    const idCorto = String(kino.config.get("malClientId") || "").slice(0, 8);
+    let nombre = "";
+    try { nombre = kino.storage.get("malNombre") || ""; } catch (e) { /* cache */ }
     if (estado && estado.indexOf("error") === 0) {
-      mal = "MyAnimeList ⚠ " + estado.slice(6, 55) + " (ID " + idCorto + ")";
-    } else if (estado === "ok") {
-      mal = "MyAnimeList ✓";
+      mal = "MyAnimeList ⚠ " + estado.slice(6, 55);
+    } else if (nombre) {
+      mal = "MyAnimeList ✓ como " + nombre;
     } else {
-      mal = "MyAnimeList ✓ (se activa con el primer episodio)";
+      mal = "MyAnimeList ✓ (toca Probar conexión)";
     }
   }
   return { estado: anilist + "  ·  " + mal };
 }
 
-// El botón "Probar MyAnimeList" de Ajustes: canjea el código si hace
-// falta, pide el usuario conectado a MAL y devuelve el veredicto.
+// El botón "Probar conexión" de Ajustes: prueba las dos cuentas y devuelve
+// el veredicto. Con MAL canjea el código si hace falta (el código es de un
+// solo uso: este es el momento de canjearlo sin esperar un episodio).
 export async function action(key) {
   await null;
-  if (key !== "probarMal") return null;
-  try {
-    const token = await malToken();
-    const r = await kino.fetch("https://api.myanimelist.net/v2/users/@me", {
-      headers: { Authorization: "Bearer " + token }
-    });
-    if (!r.ok) {
-      let d = "";
-      try { d = (r.text() || "").slice(0, 60); } catch (e2) { /* sin cuerpo */ }
-      try { kino.storage.set("malEstado", "error @me " + r.status + " " + d, 2500000000); } catch (e3) { /* cache */ }
-      return { message: "MyAnimeList respondió " + r.status + ": " + d };
+  if (key !== "probar") return null;
+  const partes = [];
+
+  const token = tokenAniList();
+  if (token) {
+    try {
+      const nombre = await probarTokenAniList(token);
+      try { kino.storage.set("anilistNombre", nombre, 2500000000); } catch (e2) { /* cache */ }
+      kino.log("anilist: prueba OK, usuario:", nombre);
+      partes.push("✓ AniList como " + nombre);
+    } catch (e) {
+      const porque = String(e.status || e.message || "sin detalle").slice(0, 90);
+      partes.push("✗ AniList: " + porque);
     }
-    const j = r.json();
-    try { kino.storage.set("malEstado", "ok", 2500000000); } catch (e3) { /* cache */ }
-    kino.log("mal: prueba OK, usuario:", j && j.name);
-    return { message: "✓ Conectado a MyAnimeList como: " + ((j && j.name) || (j && j.id) || "tu usuario") };
-  } catch (e) {
-    const porque = String(e.status || e.code || e.message).slice(0, 250);
-    try { kino.storage.set("malEstado", "error " + porque.slice(0, 60), 2500000000); } catch (e3) { /* cache */ }
-    return { message: "Falló la prueba: " + porque };
+  } else {
+    partes.push("— AniList sin sesión");
   }
+
+  const cred = credencialesMAL();
+  const codigo = codigoMAL();
+  if (cred && codigo) {
+    try {
+      const t = await malToken();
+      const r = await kino.fetch("https://api.myanimelist.net/v2/users/@me", {
+        headers: { Authorization: "Bearer " + t }
+      });
+      if (!r.ok) {
+        let d = "";
+        try { d = (r.text() || "").slice(0, 60); } catch (e2) { /* sin cuerpo */ }
+        try { kino.storage.set("malEstado", "error @me " + r.status + " " + d, 2500000000); } catch (e3) { /* cache */ }
+        partes.push("✗ MyAnimeList respondió " + r.status);
+      } else {
+        const j = r.json();
+        const nombre = (j && j.name) || (j && j.id) || "tu usuario";
+        try {
+          kino.storage.set("malEstado", "ok", 2500000000);
+          kino.storage.set("malNombre", String(nombre), 2500000000);
+        } catch (e3) { /* cache */ }
+        kino.log("mal: prueba OK, usuario:", nombre);
+        partes.push("✓ MyAnimeList como " + nombre);
+      }
+    } catch (e) {
+      const porque = String(e.status || e.code || e.message).slice(0, 90);
+      try { kino.storage.set("malEstado", "error " + porque.slice(0, 60), 2500000000); } catch (e3) { /* cache */ }
+      partes.push("✗ MyAnimeList: " + porque);
+    }
+  } else if (!codigo) {
+    partes.push("— MyAnimeList sin sesión");
+  } else {
+    partes.push("— MyAnimeList sin credenciales");
+  }
+
+  return { message: partes.join("  ·  ") };
 }
