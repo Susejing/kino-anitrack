@@ -1,25 +1,34 @@
 {
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
-  "version": "0.3.6",
-  "apiVersion": 7,
+  "creator": "Susejing",
+  "version": "0.5.0",
+  "apiVersion": 12,
   "entry": "plugin.js",
   "icon": "icon.png",
-  "color": "#A855F7",
-  "description": "Actualiza tu progreso de anime en AniList y MyAnimeList cada vez que terminas un episodio o una película, sin importar desde qué fuente lo reproduzcas en Kino.",
+  "description": "Actualiza tu progreso de anime en AniList y MyAnimeList cada vez que terminas un episodio o una película, sin importar desde qué fuente lo reproduzcas en Kino. Iniciar sesión es un toque y una pegada.",
   "hosts": ["graphql.anilist.co", "api.myanimelist.net", "myanimelist.net", "arm.haglund.dev"],
   "capabilities": ["tracking"],
+  "secrets": {
+    "malClientSecret": "kino-sealed:v1:RXIFQYxMlDEQj0RArBo8ofW_albcfyLygGUdbfp7DCJuXE4ZI-8QNehsHvbVYJz1zCeiqt2Sbuc9BDdOPB_zgPg498-aLCamzcs4UMO-i7R_fZKiryb6zztTWdfYouLw7aYe771CGqTSxiS4sHC_Cpk99xm-bX268JOv3w"
+  },
   "debug": true,
   "settings": [
-    { "key": "cuentas", "label": "Tus cuentas", "type": "section", "hint": "Pega tus tokens de AniList y MyAnimeList. Los tokens nunca salen de este aparato más que hacia cada servicio. Kino te pedirá confirmar en rojo que este plugin puede ver lo que reproduces: es lo que permite marcar tu progreso." },
+    { "key": "iniciar", "label": "Iniciar sesión", "type": "section", "hint": "Toca un botón, autoriza en la web y vuelve: copia la dirección de la barra del navegador y pégala en su campo. Al guardar, la sesión queda activa.", "devices": ["phone"] },
+    { "key": "ayudaLogin", "type": "help", "title": "Cómo iniciar sesión", "body": "AniList:\n1. Toca «Iniciar sesión con AniList» y autoriza.\n2. El navegador queda en example.com con la dirección llena de letras: cópiala completa.\n3. Pégala en «Pega aquí la dirección (AniList)» y toca Guardar.\n\nMyAnimeList:\n1. Toca «Iniciar sesión con MyAnimeList» y autoriza.\n2. El navegador queda en example.com?code=ALGO: cópiala completa.\n3. Pégala en «Pega aquí la dirección (MyAnimeList)», toca Guardar y luego «Probar conexión».\n\nCon eso el plugin queda activo: cada episodio o película que termines se marca solo. Kino te pedirá confirmar en rojo que este plugin puede ver lo que reproduces: es lo que permite marcar tu progreso.", "devices": ["phone"] },
+    { "key": "anilistLogin", "type": "link", "label": "Iniciar sesión con AniList", "url": "https://anilist.co/api/v2/oauth/authorize?client_id=53178&response_type=token", "devices": ["phone"] },
+    { "key": "anilistUrl", "label": "Pega aquí la dirección (AniList)", "type": "url", "hint": "Copia la dirección del navegador al terminar; el token sale de ahí", "devices": ["phone"] },
+    { "key": "malLogin", "type": "link", "label": "Iniciar sesión con MyAnimeList", "url": "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=97f502c0298629346c51608fc477e0f7&code_challenge=Wy6~bfhephcek4z8A9NsmgdVH-Ie1wBEJsWknXoS~0Kn6Yqn5cWjEEkdu2LiBKfg", "devices": ["phone"] },
+    { "key": "malUrl", "label": "Pega aquí la dirección (MyAnimeList)", "type": "url", "hint": "Copia la dirección del navegador al terminar; el código sale de ahí", "devices": ["phone"] },
+    { "key": "probar", "label": "Probar conexión", "type": "action" },
+    { "key": "estado", "label": "Conexión", "type": "status" },
+    { "key": "antiguo", "label": "Método antiguo (opcional)", "type": "section", "hint": "Si ya tenías tus tokens o tu propia app de MyAnimeList de la versión anterior, siguen aquí y siguen funcionando igual." },
     { "key": "anilistToken1", "label": "Token de AniList (parte 1)", "type": "password", "hint": "Pega el token partido en tres partes, en orden" },
     { "key": "anilistToken2", "label": "Token de AniList (parte 2)", "type": "password" },
     { "key": "anilistToken3", "label": "Token de AniList (parte 3)", "type": "password" },
-    { "key": "malClientId", "label": "Client ID de MyAnimeList", "type": "text", "hint": "De tu app en myanimelist.net/apiconfig" },
-    { "key": "malClientSecret", "label": "Client Secret de MyAnimeList", "type": "password" },
-    { "key": "malCodigo1", "label": "Código de MAL (parte 1)", "type": "text", "hint": "Pega el ?code= de example.com partido en dos partes, en orden" },
-    { "key": "malCodigo2", "label": "Código de MAL (parte 2)", "type": "text" },
-    { "key": "probarMal", "label": "Probar MyAnimeList", "type": "action" },
-    { "key": "estado", "label": "Conexión", "type": "status" }
+    { "key": "malClientId", "label": "Client ID de MAL (propio)", "type": "text", "hint": "Solo si registraste tu propia app en myanimelist.net/apiconfig" },
+    { "key": "malClientSecret", "label": "Client Secret de MAL (propio)", "type": "password" },
+    { "key": "malCodigo1", "label": "Código de MAL (parte 1)", "type": "text", "hint": "Método antiguo: el ?code= de example.com partido en dos" },
+    { "key": "malCodigo2", "label": "Código de MAL (parte 2)", "type": "text" }
   ]
 }
