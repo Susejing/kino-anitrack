@@ -37,7 +37,7 @@
       "url": "https://anilist.co/api/v2/oauth/authorize?client_id=53178&response_type=token",
       "devices": ["phone"]
     },
-                                                                                                                          
+                                                                                                                            
     {
       "key": "anilistUrl",
       "label": "Pega aquí la dirección (AniList)",
@@ -97,7 +97,7 @@
       "label": "Código de MAL (parte 2)",
       "type": "text"
     },
-                                                                                                         
+                                                                                                        
     {
       "key": "anilistToken1",
       "label": "Token de AniList (parte 1)",
