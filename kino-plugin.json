@@ -30,7 +30,7 @@
       "body": "AniList:\n1. Toca «Iniciar sesión con AniList» y autoriza.\n2. El navegador queda en example.com con la dirección llena de letras: cópiala completa.\n3. Pégala en «Pega aquí la dirección (AniList)» y toca Guardar.\n\nMyAnimeList:\n1. En myanimelist.net/apiconfig (gratis) abre tu app y copia su Client ID y su Client Secret: pégalos abajo en «MyAnimeList con tu propia app».\n2. Toca «Iniciar sesión con MyAnimeList» y autoriza con ESA misma app.\n3. El navegador queda en example.com?code=ALGO: cópiala completa.\n4. Pégala en «Pega aquí la dirección (MyAnimeList)», toca Guardar y luego «Probar conexión».\n\nCon eso el plugin queda activo: cada episodio o película que termines se marca solo. Kino te pedirá confirmar en rojo que este plugin puede ver lo que reproduces: es lo que permite marcar tu progreso.",
       "devices": ["phone"]
     },
-                                                                                                                                                                                        
+                                                                                                                                                                                                                                        
     {
       "key": "anilistLogin",
       "type": "link",
@@ -86,7 +86,7 @@
       "label": "Client Secret de MAL (propio)",
       "type": "password"
     },
-                                                                                                                                                                           
+                                                                                                                                                              
     {
       "key": "malCodigo1",
       "label": "Código de MAL (parte 1)",
