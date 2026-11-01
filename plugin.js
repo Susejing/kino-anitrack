@@ -9,13 +9,13 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.5.0";
+const VERSION = "0.6.0";
 
-// El Client ID de la app de MyAnimeList del AUTOR (la misma del botón
-// "Iniciar sesión con MyAnimeList"). Es público: viaja en la URL de
-// autorización. Su Client Secret va SELLADO en el manifiesto y solo Kino
-// puede abrirlo: ninguna persona necesita registrar su propia app.
-const MAL_CLIENT_ID_AUTOR = "97f502c0298629346c51608fc477e0f7";
+// El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
+// botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
+// Client Secret: MAL la acepta sin él, así que el botón funciona para
+// cualquier persona sin registrar su propia app.
+const MAL_CLIENT_ID_AUTOR = "e2de54b14a697f86d587ae52eeeb70b7";
 
 // ---------- utilidades ----------
 
@@ -41,6 +41,7 @@ async function fetchJson(url, options) {
 
 // Evita entregar dos veces el mismo evento (Kino reintenta; el id es la clave).
 // Si el almacenamiento fallara, no debe tumbar la entrega: se ignora y sigue.
+                                        
 function yaEntregado(id) {
   try {
     let seen = kino.storage.get("seen");
@@ -95,6 +96,7 @@ function unirToken(objeto) {
 // Token de AniList: primero la dirección pegada (método nuevo), y si no,
 // las tres partes del método antiguo.
 function tokenAniList() {
+                                                            
   const deUrl = tokenAniListDeUrl(kino.config.get("anilistUrl"));
   if (deUrl) return deUrl;
   return unirToken({
@@ -114,24 +116,13 @@ function codigoMAL() {
          limpio(kino.config.get("malCodigo2"));
 }
 
-// Credenciales de MAL: si la persona llenó las suyas del método antiguo,
-// esas ganan; si no, la app del autor: client id público + client secret
-// sellado en el manifiesto (kino.secret entrega un marcador que Kino
-// cambia por el valor real justo antes de enviar la petición).
+// Credenciales de MAL: si la persona llenó las suyas, esas ganan; si no,
+// la app pública del autor (client id público, client secret vacío).
 function credencialesMAL() {
   const id = String(kino.config.get("malClientId") || "").trim();
   const sec = String(kino.config.get("malClientSecret") || "").trim();
   if (id && sec) return { clientId: id, clientSecret: sec };
-  // El client id de MAL es hexadecimal (letras y números): si el marcador
-  // de posición siguiera ahí (trae guiones bajos), la app del autor aún no
-  // estaría configurada y MAL quedaría apagado sin dar error.
-  if (/^[0-9a-fA-F]+$/.test(MAL_CLIENT_ID_AUTOR)) {
-    try {
-      const sello = kino.secret("malClientSecret");
-      if (sello) return { clientId: MAL_CLIENT_ID_AUTOR, clientSecret: sello };
-    } catch (e) { /* sin secreto sellado: MAL queda apagado */ }
-  }
-  return null;
+  return { clientId: MAL_CLIENT_ID_AUTOR, clientSecret: "" };
 }
 
 // Prueba el token contra AniList. Devuelve el nombre del usuario si sirve.
@@ -156,6 +147,7 @@ async function probarTokenAniList(token) {
 async function resolverAnime(ids, title) {
   await null;
   if (ids && (ids.anilist || ids.mal)) {
+                                        
     let a = ids.anilist || null;
     let m = ids.mal || null;
     // Si Kino trae solo uno de los dos ids, completar el que falta con una
@@ -199,6 +191,7 @@ async function resolverAnime(ids, title) {
       }
       kino.log("resolver: ARM no lo encontró");
     } catch (e) {
+                                                                                       
       kino.log("resolver: ARM falló:", String(e.status || e.code || e.message).slice(0, 120));
     }
   }
@@ -251,6 +244,7 @@ async function enAniList(token, { anilistId, progress, status }) {
 
 // El verificador PKCE de MAL: el reto del link de autorización es ESTE
 // MISMO texto (MAL solo soporta el método "plain": reto = verificador).
+                                                                 
 const MAL_VERIFIER = "Wy6~bfhephcek4z8A9NsmgdVH-Ie1wBEJsWknXoS~0Kn6Yqn5cWjEEkdu2LiBKfg";
 
 // El token de MAL vence (31 días): con el refresh token se renueva solo.
@@ -276,8 +270,8 @@ async function malToken() {
       // Cuerpo como formulario nativo del kit. SIN redirect_uri: según la
       // documentación de MAL, si la autorización no lo incluyó (nuestro
       // caso: una sola URL registrada), el canje debe omitirlo también.
-      // El client secret puede ser el marcador del secreto sellado: Kino
-      // lo cambia por el valor real antes de que la petición salga.
+      // El client secret va vacío con la app pública (sin secret): MAL
+      // lo acepta así, y el code_challenge del botón hace el trabajo.
       r = await fetchJson("https://myanimelist.net/v1/oauth2/token", {
         method: "POST",
         body: { form: {
@@ -297,6 +291,7 @@ async function malToken() {
       e2.status = e2.message;
       throw e2;
     }
+                                        
     if (r.access_token && r.refresh_token) {
       // El access token de MAL vive 1 hora: se cachea la mitad de su vida
       // real (en milisegundos), con un mínimo de un minuto.
@@ -348,6 +343,7 @@ async function malToken() {
 }
 
 async function enMAL(malId, { progress, status }) {
+                                        
   await null;
   const enviar = async (token) => {
     return kino.fetch("https://api.myanimelist.net/v2/anime/" + malId + "/my_list_status", {
@@ -395,6 +391,7 @@ export async function track(event) {
   const titulo = event.kind === "episode" ? event.show && event.show.title : event.title;
 
   try {
+                                        
     const anime = await resolverAnime(ids, titulo);
     if (!anime || (!anime.anilist && !anime.mal)) {
       kino.log("track: no se pudo identificar el anime; evento ignorado");
@@ -441,6 +438,7 @@ export async function track(event) {
     kino.log("track entregado:", event.type);
     return resultado;
   } catch (e) {
+                                        
     // Errores con código (kino.error o kino.fetch) pasan tal cual.
     // Cualquier otra falla inesperada se reporta con su motivo.
     if (e && typeof e.code === "string") throw e;
@@ -482,6 +480,7 @@ export async function validateSettings(values) {
       kino.log("validación: token de AniList correcto, usuario", nombre);
       return null;
     } catch (e) {
+                                        
       const porque = String(e.status || e.message || "sin detalle");
       kino.log("validación: AniList rechazó el token:", porque.slice(0, 120));
       if (tokenDeUrl) {
@@ -537,6 +536,7 @@ export async function action(key) {
   const token = tokenAniList();
   if (token) {
     try {
+                                                      
       const nombre = await probarTokenAniList(token);
       try { kino.storage.set("anilistNombre", nombre, 2500000000); } catch (e2) { /* cache */ }
       kino.log("anilist: prueba OK, usuario:", nombre);
