@@ -16,6 +16,7 @@
   "capabilities": ["tracking"],
   "debug": true,
   "settings": [
+                                                                    
     {
       "key": "iniciar",
       "label": "Iniciar sesión",
