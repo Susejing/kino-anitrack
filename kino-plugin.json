@@ -1,7 +1,7 @@
 {
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
-  "creator": "Susejing",
+  "author": "Susejing",
   "version": "0.6.0",
   "apiVersion": 12,
   "entry": "plugin.js",
