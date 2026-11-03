@@ -9,7 +9,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.7.1";
+const VERSION = "0.7.2";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -576,6 +576,19 @@ export async function proto_manga_markChapter(arg) {
       manga = media2 || { anilist: null, mal: porTitulo, titulo: title, leido: null };
       kino.log("manga: MAL la encontró por título («" + title.slice(0, 40) + "», id " + porTitulo + ")");
     }
+  }
+  // v0.7.2 — el id de MAL que trae el lector (MangaTrack) viene de una
+  // fuente exacta, los "links" de MangaDex: si AniList no conoce ese
+  // mapeo o la serie no trae enlace a MAL, MAL igual queda marcado
+  // con ese id — es metadato fiable, no un parecido de título.
+  const malDeArg = Number((arg && arg.malId)) || 0;
+  if (manga && !manga.mal && malDeArg > 0 && malListo) {
+    manga.mal = malDeArg;
+    kino.log("manga: enlace de MAL del lector (id " + malDeArg + ")");
+  }
+  if ((!manga || (!manga.anilist && !manga.mal)) && malDeArg > 0 && malListo) {
+    manga = { anilist: null, mal: malDeArg, titulo: title, leido: null };
+    kino.log("manga: solo MAL, por el id exacto del lector (id " + malDeArg + ")");
   }
   if (!manga || (!manga.anilist && !manga.mal)) {
     kino.log("manga: no encontrada en AniList («" + title.slice(0, 60) + "»)");
