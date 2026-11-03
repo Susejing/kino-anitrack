@@ -3,13 +3,19 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.7.3 — afinar el manga: (a) los títulos con adornos «(Sin Censura)»
+// se reintentan sin el adorno en AniList y MAL (los catálogos los
+// guardan limpios); (b) MAL rechazaba con HTTP 400 las búsquedas de
+// títulos larguísimos: la búsqueda viaja ahora con el comienzo del
+// título (64 letras), y el emparejamiento sigue siendo con el título
+// completo.
 // v0.5.0: iniciar sesión es un botón y una pegada. AniList y MAL no ofrecen
 // el flujo "introduce un código en la TV", y un plugin no puede recibir la
 // respuesta del navegador: el mínimo físico posible es tocar el botón,
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.7.2";
+const VERSION = "0.7.3";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -443,6 +449,20 @@ async function enMangaMAL(malId, progress, status) {
   }
 }
 
+// Quita los adornos que ponen las fuentes al final del título —
+// «(Sin Censura)», «(Novela)»… — porque AniList y MAL no los conocen y
+// con ellos la serie jamás calza. Solo como SEGUNDA oportunidad: el
+// título tal cual llegó se intenta primero.
+function tituloLimpio(t) {
+  let s = String(t || "").trim();
+  let antes = "";
+  while (antes !== s) {
+    antes = s;
+    s = s.replace(/\s*\([^()]{1,40}\)\s*$/, "").trim();
+  }
+  return s;
+}
+
 // Título normalizado para comparar: minúsculas, sin acentos y con solo
 // letras y números (los signos y el espaciado de más sobran).
 function normTitulo(s) {
@@ -485,7 +505,11 @@ function elegirMedia(lista, title) {
 async function buscarMangaMAL(titulo) {
   await null;
   try {
-    const r = await kino.fetch("https://api.myanimelist.net/v2/manga?q=" + encodeURIComponent(titulo)
+    // v0.7.3 — MAL responde 400 a las búsquedas de títulos larguísimos:
+    // se busca por el comienzo del título (64 letras bastan para que sus
+    // resultados sean los mismos) y el emparejamiento sigue siendo con
+    // el título completo.
+    const r = await kino.fetch("https://api.myanimelist.net/v2/manga?q=" + encodeURIComponent(String(titulo).slice(0, 64))
       + "&limit=8&fields=id,title,alternative_titles", {
       headers: { Authorization: "Bearer " + (await malToken()) }
     });
@@ -545,6 +569,7 @@ export async function proto_manga_markChapter(arg) {
   const num = Number(arg && arg.chapter);
   if (!title || !isFinite(num)) throw new Error("sin título o capítulo");
   const cap = Math.max(0, Math.floor(num));
+  const limpio = tituloLimpio(title);
   const anilistToken = tokenAniList();
   let malListo = false;
   try {
@@ -558,6 +583,13 @@ export async function proto_manga_markChapter(arg) {
     Number((arg && arg.anilistId)) || 0,
     Number((arg && arg.malId)) || 0,
     title, anilistToken);
+  // v0.7.3 — adornos «(Sin Censura)»: los catálogos guardan la serie sin
+  // ellos, así que el título limpio es otra oportunidad legítima (el
+  // emparejamiento sigue exigente: nunca marca por parecido vago).
+  if (!manga && limpio && limpio !== title) {
+    manga = await resolverManga(0, 0, limpio, anilistToken);
+    if (manga) kino.log("manga: encontrada sin el adorno del título («" + title.slice(0, 40) + "»)");
+  }
   // v0.7.1 — afinar el emparejamiento con MAL: (a) AniList la tiene
   // pero sin enlace a MAL (típico de manhuas chinos y series muy
   // nuevas): se busca en MAL por el título; (b) AniList no la encontró:
@@ -570,7 +602,8 @@ export async function proto_manga_markChapter(arg) {
     }
   }
   if ((!manga || (!manga.anilist && !manga.mal)) && malListo) {
-    const porTitulo = await buscarMangaMAL(title);
+    let porTitulo = await buscarMangaMAL(title);
+    if (!porTitulo && limpio && limpio !== title) porTitulo = await buscarMangaMAL(limpio);
     if (porTitulo) {
       const media2 = await resolverManga(0, porTitulo, title, anilistToken);
       manga = media2 || { anilist: null, mal: porTitulo, titulo: title, leido: null };
