@@ -9,7 +9,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -385,7 +385,7 @@ async function enMAL(malId, { progress, status }) {
 async function resolverManga(anilistId, malId, title, token) {
   await null;
   const headers = token ? { Authorization: "Bearer " + token } : undefined;
-  const campos = "id idMal title { romaji } mediaListEntry { progress }";
+  const campos = "id idMal title { romaji english } synonyms mediaListEntry { progress }";
   let media = null;
   if (anilistId || malId) {
     const porId = anilistId
@@ -401,9 +401,9 @@ async function resolverManga(anilistId, malId, title, token) {
     try {
       const r = await fetchJson("https://graphql.anilist.co", {
         method: "POST", headers: headers,
-        body: { json: { query: "query ($s: String) { Page(perPage: 1) { media(search: $s, type: MANGA, isAdult: false) { " + campos + " } } }", variables: { s: title } } }
+        body: { json: { query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: MANGA, isAdult: false) { " + campos + " } } }", variables: { s: title } } }
       });
-      media = (r && r.data && r.data.Page && r.data.Page.media && r.data.Page.media[0]) || null;
+      media = elegirMedia(r && r.data && r.data.Page && r.data.Page.media, title);
     } catch (e) {
       kino.log("manga: búsqueda por título falló:", String((e && e.message) || e).slice(0, 120));
     }
@@ -443,6 +443,83 @@ async function enMangaMAL(malId, progress, status) {
   }
 }
 
+// Título normalizado para comparar: minúsculas, sin acentos y con solo
+// letras y números (los signos y el espaciado de más sobran).
+function normTitulo(s) {
+  const conA = "áàäâãéèëêíìïîóòöôõúùüûñç";
+  const sinA = "aaaaaeeeeiiiiooooouuuunc";
+  const t = String(s || "").toLowerCase();
+  let out = "";
+  for (let i = 0; i < t.length; i++) {
+    const j = conA.indexOf(t[i]);
+    out += j >= 0 ? sinA[j] : t[i];
+  }
+  return out.replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// De los candidatos de AniList elige el que mejor calza con el título
+// que llegó (romaji, inglés o sinónimo): si ninguno calza claro se
+// queda con el primero, que es el ranking de la propia búsqueda.
+function elegirMedia(lista, title) {
+  if (!Array.isArray(lista) || !lista.length) return null;
+  const q = normTitulo(title);
+  if (!q) return lista[0];
+  for (let i = 0; i < lista.length; i++) {
+    const m = lista[i];
+    const nombres = [m && m.title && m.title.romaji, m && m.title && m.title.english]
+      .concat((m && m.synonyms) || []);
+    for (let t = 0; t < nombres.length; t++) {
+      const nt = normTitulo(nombres[t]);
+      if (!nt) continue;
+      if (nt === q) return m;
+      if (nt.length >= 10 && q.length >= 10 && (nt.indexOf(q) >= 0 || q.indexOf(nt) >= 0)) return m;
+    }
+  }
+  return lista[0];
+}
+
+// Busca una serie de manga en MAL por título y devuelve su id SOLO si
+// el match es claro (título exacto tras normalizar, o uno único que
+// contiene al otro): si hay duda, no marca nada en MAL — mejor
+// quedarse corto que marcar una serie equivocada.
+async function buscarMangaMAL(titulo) {
+  await null;
+  try {
+    const r = await kino.fetch("https://api.myanimelist.net/v2/manga?q=" + encodeURIComponent(titulo)
+      + "&limit=8&fields=id,title,alternative_titles", {
+      headers: { Authorization: "Bearer " + (await malToken()) }
+    });
+    if (!r.ok) { kino.log("manga: búsqueda en MAL HTTP " + r.status); return null; }
+    const j = r.json();
+    const datos = (j && j.data) || [];
+    if (!Array.isArray(datos) || !datos.length) return null;
+    const q = normTitulo(titulo);
+    if (!q) return null;
+    let mejor = null, mejorP = 0, empate = false;
+    for (let i = 0; i < datos.length; i++) {
+      const nodo = datos[i] && datos[i].node;
+      if (!nodo || !nodo.id) continue;
+      const alt = (nodo.alternative_titles && nodo.alternative_titles.synonyms) || [];
+      const titulos = [nodo.title, nodo.alternative_titles && nodo.alternative_titles.en,
+        nodo.alternative_titles && nodo.alternative_titles.ja].concat(alt);
+      let p = 0;
+      for (let t = 0; t < titulos.length; t++) {
+        const nt = normTitulo(titulos[t]);
+        if (!nt) continue;
+        if (nt === q) { p = 3; break; }
+        if (nt.length >= 10 && q.length >= 10 && (nt.indexOf(q) >= 0 || q.indexOf(nt) >= 0)) p = Math.max(p, 2);
+      }
+      if (p > mejorP) { mejorP = p; mejor = nodo.id; empate = false; }
+      else if (p > 0 && p === mejorP && nodo.id !== mejor) empate = true;
+    }
+    if (mejor && mejorP >= 2 && !empate) return mejor;
+    return null;
+  } catch (e) {
+    kino.log("manga: búsqueda en MAL falló:", String((e && e.message) || e).slice(0, 80));
+    return null;
+  }
+}
+
 // El progreso de manga que hay hoy en la lista de MAL de la persona
 // (para no rebajarla jamás).
 async function progresoMangaMAL(malId) {
@@ -477,10 +554,29 @@ export async function proto_manga_markChapter(arg) {
     kino.log("manga: sin sesión, no se registró «" + title.slice(0, 40) + "»");
     return { marked: false, reason: "sin-sesion", title: title };
   }
-  const manga = await resolverManga(
+  let manga = await resolverManga(
     Number((arg && arg.anilistId)) || 0,
     Number((arg && arg.malId)) || 0,
     title, anilistToken);
+  // v0.7.1 — afinar el emparejamiento con MAL: (a) AniList la tiene
+  // pero sin enlace a MAL (típico de manhuas chinos y series muy
+  // nuevas): se busca en MAL por el título; (b) AniList no la encontró:
+  // MAL busca por título y con su id se resuelve el registro completo.
+  if (manga && !manga.mal && malListo) {
+    const porTitulo = await buscarMangaMAL(manga.titulo || title);
+    if (porTitulo) {
+      manga.mal = porTitulo;
+      kino.log("manga: enlace de MAL hallado por título (id " + porTitulo + ")");
+    }
+  }
+  if ((!manga || (!manga.anilist && !manga.mal)) && malListo) {
+    const porTitulo = await buscarMangaMAL(title);
+    if (porTitulo) {
+      const media2 = await resolverManga(0, porTitulo, title, anilistToken);
+      manga = media2 || { anilist: null, mal: porTitulo, titulo: title, leido: null };
+      kino.log("manga: MAL la encontró por título («" + title.slice(0, 40) + "», id " + porTitulo + ")");
+    }
+  }
   if (!manga || (!manga.anilist && !manga.mal)) {
     kino.log("manga: no encontrada en AniList («" + title.slice(0, 60) + "»)");
     return { marked: false, reason: "no-encontrada", title: title };
