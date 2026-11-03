@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "author": "Susejing",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "apiVersion": 12,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -14,6 +14,36 @@
     "arm.haglund.dev"
   ],
   "capabilities": ["tracking"],
+  "enhancements": {
+    "20": {
+      "provides": {
+        "manga": {
+          "summary": "Capítulos de manga leídos: se marcan en tus listas de AniList y MyAnimeList",
+          "calls": {
+            "markChapter": {
+              "in": {
+                "title": "string",
+                "chapter": "number",
+                "source": "string?",
+                "anilistId": "number?",
+                "malId": "number?"
+              },
+              "out": "MangaMark"
+            }
+          },
+          "types": {
+            "MangaMark": {
+              "marked": "boolean",
+              "title": "string?",
+              "where": "string?",
+              "dup": "boolean?",
+              "reason": "string?"
+            }
+          }
+        }
+      }
+    }
+  },
   "debug": true,
   "settings": [
     {
