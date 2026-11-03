@@ -9,7 +9,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -366,6 +366,164 @@ async function enMAL(malId, { progress, status }) {
     e.status = "lista " + r.status + " " + detalle.slice(0, 40);
     throw e;
   }
+}
+
+// ---------- manga: la puerta "manga" del protocolo ----------
+
+// La 0.9.81 de Kino trae el protocolo entre plugins: AniTrack abre la
+// puerta "manga" (dentro de enhancements["20"], invisible para los Kino
+// viejos) y otro plugin — MangaTrack — avisa aquí cada capítulo que la
+// persona abre. AniTrack busca la serie en AniList (por ids si vienen,
+// por título si no) y marca el capítulo leído en las listas de manga de
+// AniList y MAL. Nunca baja el progreso que ya había, y lo que no se
+// puede cumplir se responde con un motivo, no con un error seco.
+
+// Busca la serie: primero por ids (MangaDex los publica en cada serie),
+// si no por título. Trae también el progreso actual en AniList
+// (mediaListEntry, solo con token) para no rebajar la lista al releer
+// un capítulo viejo.
+async function resolverManga(anilistId, malId, title, token) {
+  await null;
+  const headers = token ? { Authorization: "Bearer " + token } : undefined;
+  const campos = "id idMal title { romaji } mediaListEntry { progress }";
+  let media = null;
+  if (anilistId || malId) {
+    const porId = anilistId
+      ? { query: "query ($id: Int) { Media(id: $id, type: MANGA) { " + campos + " } }", variables: { id: anilistId } }
+      : { query: "query ($idMal: Int) { Media(idMal: $idMal, type: MANGA) { " + campos + " } }", variables: { idMal: malId } };
+    try {
+      const r = await fetchJson("https://graphql.anilist.co", { method: "POST", headers: headers, body: { json: porId } });
+      media = (r && r.data && r.data.Media) || null;
+    } catch (e) {
+      kino.log("manga: resolver por id falló:", String((e && e.message) || e).slice(0, 120));
+    }
+  } else if (title) {
+    try {
+      const r = await fetchJson("https://graphql.anilist.co", {
+        method: "POST", headers: headers,
+        body: { json: { query: "query ($s: String) { Page(perPage: 1) { media(search: $s, type: MANGA, isAdult: false) { " + campos + " } } }", variables: { s: title } } }
+      });
+      media = (r && r.data && r.data.Page && r.data.Page.media && r.data.Page.media[0]) || null;
+    } catch (e) {
+      kino.log("manga: búsqueda por título falló:", String((e && e.message) || e).slice(0, 120));
+    }
+  }
+  if (!media) return null;
+  return {
+    anilist: media.id || null,
+    mal: media.idMal || null,
+    titulo: (media.title && media.title.romaji) || title,
+    leido: (media.mediaListEntry && typeof media.mediaListEntry.progress === "number")
+      ? media.mediaListEntry.progress : null
+  };
+}
+
+// Marca un capítulo de manga en la lista de MAL: el endpoint de manga
+// es PATCH con num_chapters_read (el de anime era PUT con episodios).
+async function enMangaMAL(malId, progress, status) {
+  await null;
+  const enviar = async (token) => {
+    return kino.fetch("https://api.myanimelist.net/v2/manga/" + malId + "/my_list_status", {
+      method: "PATCH",
+      headers: { Authorization: "Bearer " + token },
+      body: { form: { num_chapters_read: progress, status: status } }
+    });
+  };
+  let r = await enviar(await malToken());
+  if (r.status === 401) {
+    kino.storage.remove("malAccessToken");
+    r = await enviar(await malToken());
+  }
+  if (!r.ok) {
+    let detalle = "";
+    try { detalle = (r.text() || "").slice(0, 80); } catch (e2) { /* sin cuerpo */ }
+    const e = new Error("MAL respondió " + r.status + " " + detalle);
+    e.status = "lista manga " + r.status;
+    throw e;
+  }
+}
+
+// El progreso de manga que hay hoy en la lista de MAL de la persona
+// (para no rebajarla jamás).
+async function progresoMangaMAL(malId) {
+  await null;
+  const r = await kino.fetch("https://api.myanimelist.net/v2/manga/" + malId + "?fields=my_list_status", {
+    headers: { Authorization: "Bearer " + (await malToken()) }
+  });
+  if (!r.ok) return null;
+  try {
+    const j = r.json();
+    const st = j && j.my_list_status;
+    return (st && Number(st.num_chapters_read)) || 0;
+  } catch (e) { return null; }
+}
+
+// La puerta: proto_manga_markChapter({ title, chapter, source?,
+// anilistId?, malId? }) responde { marked, title?, where?, dup?,
+// reason? }. Los motivos son "sin-sesion", "no-encontrada" y "fallo",
+// para que quien llama pueda decirle a la persona qué pasó.
+export async function proto_manga_markChapter(arg) {
+  await null;
+  const title = String((arg && arg.title) || "").trim().slice(0, 200);
+  const num = Number(arg && arg.chapter);
+  if (!title || !isFinite(num)) throw new Error("sin título o capítulo");
+  const cap = Math.max(0, Math.floor(num));
+  const anilistToken = tokenAniList();
+  let malListo = false;
+  try {
+    malListo = !!(credencialesMAL() && (codigoMAL() || kino.storage.get("malRefreshTokenRotado")));
+  } catch (e) { malListo = false; }
+  if (!anilistToken && !malListo) {
+    kino.log("manga: sin sesión, no se registró «" + title.slice(0, 40) + "»");
+    return { marked: false, reason: "sin-sesion", title: title };
+  }
+  const manga = await resolverManga(
+    Number((arg && arg.anilistId)) || 0,
+    Number((arg && arg.malId)) || 0,
+    title, anilistToken);
+  if (!manga || (!manga.anilist && !manga.mal)) {
+    kino.log("manga: no encontrada en AniList («" + title.slice(0, 60) + "»)");
+    return { marked: false, reason: "no-encontrada", title: title };
+  }
+  const donde = [];
+  let yaEstaba = false;
+  let fallo = "";
+  if (manga.anilist && anilistToken) {
+    if (manga.leido !== null && manga.leido >= cap) {
+      yaEstaba = true;
+    } else {
+      try {
+        await enAniList(anilistToken, { anilistId: manga.anilist, progress: cap, status: "CURRENT" });
+        donde.push("AniList");
+      } catch (e) {
+        fallo = "anilist " + String((e && (e.status || e.message)) || e).slice(0, 80);
+        kino.log("manga: AniList falló:", fallo);
+      }
+    }
+  }
+  if (manga.mal && malListo) {
+    let actual = null;
+    try { actual = await progresoMangaMAL(manga.mal); }
+    catch (e) { kino.log("manga: progreso MAL falló:", String((e && e.message) || e).slice(0, 80)); }
+    if (actual !== null && actual >= cap) {
+      yaEstaba = true;
+    } else {
+      try {
+        await enMangaMAL(manga.mal, cap, "reading");
+        donde.push("MAL");
+      } catch (e) {
+        fallo = (fallo ? fallo + " · " : "") + "mal " + String((e && (e.status || e.message)) || e).slice(0, 80);
+        kino.log("manga: MAL falló:", String((e && (e.status || e.message)) || e).slice(0, 80));
+      }
+    }
+  }
+  if (donde.length) {
+    kino.log("manga: cap " + cap + " de «" + manga.titulo + "» en " + donde.join(" y "));
+    return { marked: true, dup: false, title: manga.titulo, where: donde.join(" y ") };
+  }
+  if (yaEstaba) return { marked: true, dup: true, title: manga.titulo, where: "" };
+  if (fallo) return { marked: false, reason: "fallo", title: title };
+  return { marked: false, reason: "sin-id", title: title };
 }
 
 // ---------- track (la capability "tracking") ----------
