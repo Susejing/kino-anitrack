@@ -19,19 +19,31 @@
 // títulos larguísimos: la búsqueda viaja ahora con el comienzo del
 // título (64 letras), y el emparejamiento sigue siendo con el título
 // completo.
+// v0.9.0 — iniciar sesión es tocar y autorizar: nueva pantalla propia del
+// plugin (Inicio ▸ AniTrack) con una ventanita de autorización que se
+// cierra sola al caer en example.com; el plugin captura la dirección
+// final y guarda la sesión. Nada de copiar ni pegar. El método manual
+// de Ajustes queda como respaldo de siempre.
 // v0.5.0: iniciar sesión es un botón y una pegada. AniList y MAL no ofrecen
 // el flujo "introduce un código en la TV", y un plugin no puede recibir la
 // respuesta del navegador: el mínimo físico posible es tocar el botón,
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.8.0";
+const VERSION = "0.9.0";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
 // Client Secret: MAL la acepta sin él, así que el botón funciona para
 // cualquier persona sin registrar su propia app.
 const MAL_CLIENT_ID_AUTOR = "e2de54b14a697f86d587ae52eeeb70b7";
+
+// v0.9.0 — las direcciones de autorización (las mismas de los botones de
+// Ajustes): la pantalla propia las abre en la ventanita, la ventana se
+// cierra sola al caer en example.com y el plugin captura la dirección
+// final — así ya no hay que copiar ni pegar nada.
+const ANILIST_AUTH_URL = "https://anilist.co/api/v2/oauth/authorize?client_id=53178&response_type=token";
+const MAL_AUTH_URL = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=e2de54b14a697f86d587ae52eeeb70b7&code_challenge=Wy6~bfhephcek4z8A9NsmgdVH-Ie1wBEJsWknXoS~0Kn6Yqn5cWjEEkdu2LiBKfg";
 
 // ---------- utilidades ----------
 
@@ -113,6 +125,10 @@ function unirToken(objeto) {
 // las tres partes del método antiguo.
 function tokenAniList() {
                                                             
+  // v0.9.0 — primero el token capturado por la ventanita de la pantalla.
+  let auto = "";
+  try { auto = String(kino.storage.get("alTokenAuto") || ""); } catch (e) { auto = ""; }
+  if (auto) return auto;
   const deUrl = tokenAniListDeUrl(kino.config.get("anilistUrl"));
   if (deUrl) return deUrl;
   return unirToken({
@@ -125,6 +141,10 @@ function tokenAniList() {
 // Código de MAL: primero la dirección pegada (método nuevo), y si no, las
 // dos partes del método antiguo.
 function codigoMAL() {
+  // v0.9.0 — primero el código capturado por la ventanita de la pantalla.
+  let auto = "";
+  try { auto = String(kino.storage.get("malCodigoAuto") || ""); } catch (e) { auto = ""; }
+  if (auto) return auto;
   const deUrl = codigoMALDeUrl(kino.config.get("malUrl"));
   if (deUrl) return deUrl;
   const limpio = (s) => String(s || "").replace(/\s+/g, "").trim();
@@ -478,6 +498,7 @@ async function resolverManga(anilistId, malId, title, token) {
 // es PATCH con num_chapters_read (el de anime era PUT con episodios).
 async function enMangaMAL(malId, progress, status) {
   await null;
+
   const enviar = async (token) => {
     return kino.fetch("https://api.myanimelist.net/v2/manga/" + malId + "/my_list_status", {
       method: "PATCH",
@@ -894,12 +915,12 @@ export async function settingsStatus() {
   return { estado: anilist + "  ·  " + mal };
 }
 
-// El botón "Probar conexión" de Ajustes: prueba las dos cuentas y devuelve
-// el veredicto. Con MAL canjea el código si hace falta (el código es de un
-// solo uso: este es el momento de canjearlo sin esperar un episodio).
-export async function action(key) {
+// v0.9.0 — el cuerpo de «Probar conexión» en un helper propio: lo usan el
+// botón de Ajustes y la pantalla del plugin sin copiar el código dos
+// veces. Con MAL canjea el código si hace falta (el código es de un solo
+// uso: este es el momento de canjearlo sin esperar un episodio).
+async function probarConexiones() {
   await null;
-  if (key !== "probar") return null;
   const partes = [];
 
   const token = tokenAniList();
@@ -952,6 +973,229 @@ export async function action(key) {
     partes.push("— MyAnimeList sin credenciales");
   }
 
-  return { message: partes.join("  ·  ") };
+  return partes.join("  ·  ");
 }
+
+// El botón "Probar conexión" de Ajustes: el veredicto de las dos cuentas.
+export async function action(key) {
+  await null;
+  if (key !== "probar") return null;
+  return { message: await probarConexiones() };
+}
+
+// ---------- la pantalla de iniciar sesión (capability "screen") ----------
+
+// v0.9.0 — la pantalla propia del plugin: el estado de las dos cuentas, un
+// botón por cuenta que abre la ventanita de autorización (se cierra sola al
+// caer en example.com y la sesión queda guardada) y «Probar conexión».
+// Es una vista pura: aquí solo se lee el almacén local, nada de red. El
+// método manual de Ajustes sigue ahí como respaldo.
+export async function screen(arg) {
+  const state = (arg && arg.state) || arg || {};
+  let alNombre = "";
+  let malNombre = "";
+  try { alNombre = String(kino.storage.get("anilistNombre") || ""); } catch (e) { alNombre = ""; }
+  try { malNombre = String(kino.storage.get("malNombre") || ""); } catch (e) { malNombre = ""; }
+  const alSesion = !!alNombre || !!tokenAniList();
+  let malSesion = !!malNombre;
+  if (!malSesion) {
+
+    try { malSesion = !!(credencialesMAL() && (codigoMAL() || kino.storage.get("malRefreshTokenRotado"))); }
+    catch (e) { malSesion = false; }
+  }
+
+  // Una tarjeta por cuenta: estado arriba, botón de sesión debajo y, si ya
+  // hay sesión, el de cerrarla (con confirmación, para no tocar de más).
+  const tarjeta = (titulo, tituloEn, sesion, nombreCuenta, loginEvent, logoutEvent) => ({
+    type: "Card", padding: 16, gap: 8, children: [
+      { type: "Text", text: titulo, textEn: tituloEn, style: "h4" },
+      { type: "Text",
+        text: sesion ? "✓ sesión como " + (nombreCuenta || "tu cuenta") : "— sin sesión todavía",
+        textEn: sesion ? "✓ signed in as " + (nombreCuenta || "your account") : "— not signed in yet",
+        style: "p", color: sesion ? "primary" : "muted" },
+      { type: "ElevatedButton", icon: "person", fill: true,
+        labelText: sesion ? "Iniciar sesión de nuevo" : "Iniciar sesión",
+        labelTextEn: sesion ? "Sign in again" : "Sign in",
+        onPressed: loginEvent },
+      ...(sesion ? [{ type: "TextButton", icon: "delete",
+        labelText: "Cerrar sesión", labelTextEn: "Sign out",
+        confirm: "¿Cerrar la sesión en este aparato?",
+        confirmEn: "Sign out on this device?",
+        onPressed: logoutEvent }] : [])
+    ]
+  });
+
+  return {
+    type: "Scaffold",
+    appBar: {
+      type: "AppBar", mergeWithKinoBar: true,
+      title: "AniTrack", titleEn: "AniTrack",
+      leading: { type: "IconButton", icon: "close", labelText: "Cerrar", labelTextEn: "Close", onPressed: { close: true } }
+    },
+    body: { type: "SingleChildScrollView", children: [{ type: "Column", padding: 16, gap: 16, crossAxisAlignment: "start", children: [
+      { type: "Text", text: "Iniciar sesión", textEn: "Sign in", style: "h3" },
+      { type: "Text",
+        text: "Toca un botón, autoriza en la ventanita y listo: se cierra sola y la sesión queda guardada en este aparato. Nada de copiar ni pegar.",
+        textEn: "Tap a button, authorize in the window and done: it closes itself and the session is saved on this device. No copying, no pasting.",
+        style: "p", color: "muted" },
+      tarjeta("AniList", "AniList", alSesion, alNombre, "alLogin", "alLogout"),
+      tarjeta("MyAnimeList", "MyAnimeList", malSesion, malNombre, "malLogin", "malLogout"),
+      { type: "ElevatedButton", icon: "sync", fill: true,
+        labelText: "Probar conexión", labelTextEn: "Test connection",
+        onPressed: "probar2" },
+      { type: "Text",
+        text: "¿No abre la ventanita? El método manual de siempre sigue en Ajustes ▸ AniTrack.",
+        textEn: "No window? The manual method is still in Settings ▸ AniTrack.",
+        style: "caption", color: "muted" },
+      { type: "Text",
+        text: "La sesión se guarda solo en este aparato: no viaja a tus otros equipos.",
+        textEn: "The session is saved on this device only: it does not travel to your other devices.",
+        style: "caption", color: "muted" }
+    ] }] }
+  };
+}
+
+// Los toques de la pantalla. «alLogin» y «malLogin» abren la ventanita de
+// autorización (permitido justo después del toque de la persona); al caer
+// en example.com la ventana se cierra sola, llega la dirección final y el
+// token o el código queda guardado y probado en el mismo toque. Los toasts
+// son honestos: si algo no salió, dicen qué pasó y que Ajustes sigue ahí.
+export async function screenEvent(ev) {
+  await null;
+  const nombre = ev && ev.name;
+  if (nombre === "open") return null;
+
+  if (nombre === "probar2") {
+    let mensaje = "";
+    try { mensaje = await probarConexiones(); }
+    catch (e) { mensaje = "✗ la prueba falló: " + String((e && (e.code || e.message)) || e).slice(0, 80); }
+    return { toast: String(mensaje).slice(0, 180) };
+  }
+
+  if (nombre === "alLogin") {
+    if (!kino.visualBrowser || !kino.visualBrowser.available) {
+      return { toast: "Este aparato no puede abrir la ventanita: usa el método manual en Ajustes ▸ AniTrack",
+        toastEn: "This device cannot open the window: use the manual method in Settings ▸ AniTrack" };
+    }
+    let r = null;
+    try {
+      r = await kino.visualBrowser.open({
+        url: ANILIST_AUTH_URL,
+        title: "AniList",
+        doneWhen: { urlMatches: "https://example.com/*" },
+        collect: { finalUrl: true },
+        timeoutMs: 600000
+      });
+    } catch (e) {
+      return { toast: "La ventanita no se pudo abrir (" + String((e && e.code) || "fallo") + "): el método manual sigue en Ajustes",
+        toastEn: "The window could not open (" + String((e && e.code) || "failed") + "): the manual method still works in Settings" };
+    }
+    if (!r || r.status === "closed") {
+      return { toast: "Quedó sin sesión: la ventanita se cerró antes de autorizar",
+        toastEn: "No session saved: the window closed before authorizing" };
+    }
+    if (r.status === "timeout") {
+      return { toast: "Quedó sin sesión: la ventanita esperó 10 minutos y se cerró; toca de nuevo cuando quieras",
+        toastEn: "No session saved: the window waited 10 minutes and closed; tap again whenever you want" };
+    }
+    const token = tokenAniListDeUrl(r.finalUrl || "");
+    if (!token) {
+      return { toast: "Quedó sin sesión: la ventanita terminó sin el token (¿cancelaste la autorización?)",
+        toastEn: "No session saved: the window finished without the token (did you cancel?)" };
+    }
+    try { kino.storage.set("alTokenAuto", token, 2500000000); } catch (e2) { /* almacén lleno */ }
+    try {
+      const nombreAL = await probarTokenAniList(token);
+      try { kino.storage.set("anilistNombre", nombreAL, 2500000000); } catch (e3) { /* cache */ }
+      return { state: { alNombre: nombreAL }, toast: "✓ AniList como " + nombreAL, toastEn: "✓ AniList as " + nombreAL };
+    } catch (e) {
+      try { kino.storage.remove("alTokenAuto"); } catch (e3) { /* cache */ }
+      const porque = String((e && (e.status || e.message)) || "sin detalle").slice(0, 90);
+      return { toast: "AniList rechazó el token (" + porque + "): quedó sin sesión",
+        toastEn: "AniList rejected the token (" + porque + "): no session saved" };
+    }
+  }
+
+  if (nombre === "malLogin") {
+    if (!kino.visualBrowser || !kino.visualBrowser.available) {
+      return { toast: "Este aparato no puede abrir la ventanita: usa el método manual en Ajustes ▸ AniTrack",
+        toastEn: "This device cannot open the window: use the manual method in Settings ▸ AniTrack" };
+    }
+    let r = null;
+    try {
+      r = await kino.visualBrowser.open({
+        url: MAL_AUTH_URL,
+        title: "MyAnimeList",
+        doneWhen: { urlMatches: "https://example.com/*" },
+        collect: { finalUrl: true },
+        timeoutMs: 600000
+      });
+    } catch (e) {
+      return { toast: "La ventanita no se pudo abrir (" + String((e && e.code) || "fallo") + "): el método manual sigue en Ajustes",
+        toastEn: "The window could not open (" + String((e && e.code) || "failed") + "): the manual method still works in Settings" };
+    }
+    if (!r || r.status === "closed") {
+      return { toast: "Quedó sin sesión: la ventanita se cerró antes de autorizar",
+        toastEn: "No session saved: the window closed before authorizing" };
+    }
+    if (r.status === "timeout") {
+      return { toast: "Quedó sin sesión: la ventanita esperó 10 minutos y se cerró; toca de nuevo cuando quieras",
+        toastEn: "No session saved: the window waited 10 minutes and closed; tap again whenever you want" };
+    }
+    const codigo = codigoMALDeUrl(r.finalUrl || "");
+    if (!codigo) {
+      return { toast: "Quedó sin sesión: la ventanita terminó sin el código (¿cancelaste la autorización?)",
+        toastEn: "No session saved: the window finished without the code (did you cancel?)" };
+    }
+    try { kino.storage.set("malCodigoAuto", codigo, 2500000000); } catch (e2) { /* almacén lleno */ }
+    try {
+      // El código es de un solo uso: se canjea aquí mismo y, si sirve, se
+      // pregunta por el nombre para el «✓ sesión como …» de la tarjeta.
+      const t = await malToken();
+      const resp = await kino.fetch("https://api.myanimelist.net/v2/users/@me", {
+        headers: { Authorization: "Bearer " + t }
+      });
+      if (!resp.ok) {
+        try { kino.storage.set("malEstado", "error @me " + resp.status, 2500000000); } catch (e3) { /* cache */ }
+        return { toast: "MAL respondió " + resp.status + ": toca «Probar conexión» para confirmar",
+          toastEn: "MAL answered " + resp.status + ": tap Test connection to confirm" };
+      }
+      const j = resp.json();
+      const nombreMAL = String((j && (j.name || j.id)) || "tu usuario");
+      try {
+        kino.storage.set("malEstado", "ok", 2500000000);
+        kino.storage.set("malNombre", nombreMAL, 2500000000);
+      } catch (e3) { /* cache */ }
+      return { state: { malNombre: nombreMAL }, toast: "✓ MyAnimeList como " + nombreMAL,
+        toastEn: "✓ MyAnimeList as " + nombreMAL };
+    } catch (e) {
+      const porque = String((e && (e.status || e.code || e.message)) || "sin detalle").slice(0, 90);
+      try { kino.storage.set("malEstado", "error " + porque.slice(0, 60), 2500000000); } catch (e3) { /* cache */ }
+      return { toast: "MAL rechazó el canje (" + porque + "): quedó sin sesión",
+        toastEn: "MAL rejected the exchange (" + porque + "): no session saved" };
+    }
+  }
+
+  if (nombre === "alLogout") {
+    try { kino.storage.remove("alTokenAuto"); } catch (e) { /* cache */ }
+    try { kino.storage.remove("anilistNombre"); } catch (e) { /* cache */ }
+    return { state: { alNombre: "" },
+      toast: "Sesión de AniList cerrada en este aparato; si pegaste una dirección a mano en Ajustes, esa sigue activa",
+      toastEn: "AniList session closed on this device; if you pasted an address by hand in Settings, that one stays active" };
+  }
+
+  if (nombre === "malLogout") {
+    const claves = ["malCodigoAuto", "malAccessToken", "malRefreshTokenRotado", "malNombre", "malEstado"];
+    for (let i = 0; i < claves.length; i++) {
+      try { kino.storage.remove(claves[i]); } catch (e) { /* cache */ }
+    }
+    return { state: { malNombre: "" },
+      toast: "Sesión de MyAnimeList cerrada en este aparato; si pegaste una dirección a mano en Ajustes, esa sigue activa",
+      toastEn: "MyAnimeList session closed on this device; if you pasted an address by hand in Settings, that one stays active" };
+  }
+
+  return null;
+}
+
+
 
