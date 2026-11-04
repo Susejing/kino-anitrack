@@ -64,3 +64,8 @@ Si venías de la versión anterior y ya tienes tus tokens o tu propia app de MyA
 **¿Por qué hay que pegar la dirección y no solo autorizar?** AniList y MAL no ofrecen el método «introduce un código corto en la TV» (eso lo tienen Trakt y SIMKL). Y un plugin de Kino no puede recibir la respuesta del navegador como una app de teléfono. Un botón + una pegada es **el mínimo físico posible** con estos dos servicios — y da igual de resultado: al Guardar, la sesión queda activa.
 
 **¿Alguien ve mis datos?** No. Los tokens viven en tu dispositivo y solo viajan a AniList y a MAL. Este plugin no tiene servidor propio.
+
+
+## Licencia
+
+Código bajo la **GPL-3.0**: puedes usarlo y modificarlo, pero tu versión debe seguir abierta y con crédito. © 2026 **Susejing** (Bogotá, Colombia). El texto completo está en el archivo [LICENSE](LICENSE).
