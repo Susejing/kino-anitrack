@@ -19,6 +19,13 @@
 // títulos larguísimos: la búsqueda viaja ahora con el comienzo del
 // título (64 letras), y el emparejamiento sigue siendo con el título
 // completo.
+// v0.9.2 — la pantalla aprende del plugin de YT Music: si ya existe la
+// sesión, la tarjeta ya no ofrece el botón de iniciar sesión (queda el
+// «✓ sesión como …» y «Cerrar sesión»; para cambiar de cuenta se cierra
+// la sesión primero). Y al abrir la pantalla, si hay sesión pero el
+// nombre no se sabía (p. ej. pegado a mano en Ajustes), se pregunta una
+// sola vez y el «✓ sesión como …» se completa solo — si la red no
+// ayuda, se queda en «tu cuenta» sin avisar: no es error.
 // v0.9.1 — arreglo del manifiesto: el hint de la sección «Iniciar sesión»
 // de Ajustes medía 308 letras y la regla oficial de los formularios es
 // máximo 300 en una sección, así que la app rechazaba la actualización
@@ -35,7 +42,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.9.1";
+const VERSION = "0.9.2";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -491,6 +498,7 @@ async function resolverManga(anilistId, malId, title, token) {
   }
   if (!media) return null;
   return {
+
     anilist: media.id || null,
     mal: media.idMal || null,
     titulo: (media.title && media.title.romaji) || title,
@@ -991,6 +999,7 @@ export async function action(key) {
 
 // ---------- la pantalla de iniciar sesión (capability "screen") ----------
 
+
 // v0.9.0 — la pantalla propia del plugin: el estado de las dos cuentas, un
 // botón por cuenta que abre la ventanita de autorización (se cierra sola al
 // caer en example.com y la sesión queda guardada) y «Probar conexión».
@@ -1011,8 +1020,10 @@ export async function screen(arg) {
     catch (e) { malSesion = false; }
   }
 
-  // Una tarjeta por cuenta: estado arriba, botón de sesión debajo y, si ya
-  // hay sesión, el de cerrarla (con confirmación, para no tocar de más).
+  // Una tarjeta por cuenta: estado arriba y, debajo, O el botón de iniciar
+  // sesión (si no la hay) O el de cerrarla (si ya la hay). Como el plugin
+  // de YT Music: si ya existe la sesión, no se vuelve a ofrecer el botón
+  // de loguear — para cambiar de cuenta se cierra la sesión primero.
   const tarjeta = (titulo, tituloEn, sesion, nombreCuenta, loginEvent, logoutEvent) => ({
     type: "Card", padding: 16, gap: 8, children: [
       { type: "Text", text: titulo, textEn: tituloEn, style: "h4" },
@@ -1020,10 +1031,9 @@ export async function screen(arg) {
         text: sesion ? "✓ sesión como " + (nombreCuenta || "tu cuenta") : "— sin sesión todavía",
         textEn: sesion ? "✓ signed in as " + (nombreCuenta || "your account") : "— not signed in yet",
         style: "p", color: sesion ? "primary" : "muted" },
-      { type: "ElevatedButton", icon: "person", fill: true,
-        labelText: sesion ? "Iniciar sesión de nuevo" : "Iniciar sesión",
-        labelTextEn: sesion ? "Sign in again" : "Sign in",
-        onPressed: loginEvent },
+      ...(sesion ? [] : [{ type: "ElevatedButton", icon: "person", fill: true,
+        labelText: "Iniciar sesión", labelTextEn: "Sign in",
+        onPressed: loginEvent }]),
       ...(sesion ? [{ type: "TextButton", icon: "delete",
         labelText: "Cerrar sesión", labelTextEn: "Sign out",
         confirm: "¿Cerrar la sesión en este aparato?",
@@ -1070,7 +1080,39 @@ export async function screen(arg) {
 export async function screenEvent(ev) {
   await null;
   const nombre = ev && ev.name;
-  if (nombre === "open") return null;
+  if (nombre === "open") {
+    // Rellenar un nombre que falte: si ya hay sesión pero el «✓ sesión
+    // como …» dice «tu cuenta» (p. ej. sesión pegada a mano en Ajustes),
+    // se pregunta una sola vez aquí y la tarjeta se completa sola. Si la
+    // red no ayuda, se queda en «tu cuenta»: no es error y no se avisa.
+    try {
+      const t = tokenAniList();
+      if (t && !kino.storage.get("anilistNombre")) {
+        const n = await probarTokenAniList(t);
+        try { kino.storage.set("anilistNombre", n, 2500000000); } catch (e2) { /* cache */ }
+        return { state: { alNombre: n } };
+      }
+    } catch (e) { /* la red no ayudó: queda «tu cuenta», no es error */ }
+    try {
+      const malHay = !!(credencialesMAL() && (codigoMAL() || kino.storage.get("malRefreshTokenRotado")));
+      if (malHay && !kino.storage.get("malNombre")) {
+        const t = await malToken();
+        const resp = await kino.fetch("https://api.myanimelist.net/v2/users/@me", {
+          headers: { Authorization: "Bearer " + t }
+        });
+        if (resp && resp.ok) {
+          const j = resp.json();
+          const n = String((j && (j.name || j.id)) || "tu usuario");
+          try {
+            kino.storage.set("malNombre", n, 2500000000);
+            kino.storage.set("malEstado", "ok", 2500000000);
+          } catch (e2) { /* cache */ }
+          return { state: { malNombre: n } };
+        }
+      }
+    } catch (e) { /* idem: queda «tu cuenta», no es error */ }
+    return null;
+  }
 
   if (nombre === "probar2") {
     let mensaje = "";
@@ -1203,6 +1245,7 @@ export async function screenEvent(ev) {
 
   return null;
 }
+
 
 
 
