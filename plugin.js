@@ -3,6 +3,16 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.8.0 — los +18 existen: las búsquedas por título llevaban clavado el
+// filtro «isAdult: false» de AniList, así que un manga o anime +18
+// jamás aparecía por su nombre (la documentación de AniList lo dice:
+// ese filtro aparta el contenido adulto). Ahora la búsqueda va en DOS
+// pasadas: primero la de siempre (sin adultos, para que las búsquedas
+// normales no cambien ni se les cuele nada raro) y, si no apareció,
+// una segunda pasada SOLO entre los +18 — que solo acepta la serie si
+// el título calza de verdad (nada de "el primero de la lista"): así
+// un título normal que no exista en AniList no puede acabar marcado
+// en una serie adulta equivocada.
 // v0.7.3 — afinar el manga: (a) los títulos con adornos «(Sin Censura)»
 // se reintentan sin el adorno en AniList y MAL (los catálogos los
 // guardan limpios); (b) MAL rechazaba con HTTP 400 las búsquedas de
@@ -15,7 +25,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.7.3";
+const VERSION = "0.8.0";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -216,6 +226,27 @@ async function resolverAnime(ids, title) {
         return { anilist: media.id, mal: media.idMal || null };
       }
       kino.log("resolver: búsqueda por título sin resultados");
+      // v0.8.0 — segunda pasada SOLO entre anime +18: con el filtro de
+      // siempre (isAdult: false) un anime adulto jamás salía por su
+      // nombre. Solo se acepta si el título calza de verdad.
+      try {
+        const r2 = await fetchJson("https://graphql.anilist.co", {
+          method: "POST",
+          body: { json: {
+            query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: ANIME, isAdult: true) { id idMal title { romaji english } synonyms } } }",
+            variables: { s: title }
+          } }
+        });
+        const lista2 = (r2 && r2.data && r2.data.Page && r2.data.Page.media) || [];
+        for (let i = 0; i < lista2.length; i++) {
+          if (calzaMedia(lista2[i], title)) {
+            kino.log("resolver: anime +18 encontrado por título");
+            return { anilist: lista2[i].id, mal: lista2[i].idMal || null };
+          }
+        }
+      } catch (e2) {
+        kino.log("resolver: pasada +18 falló:", String(e2.status || e2.code || e2.message).slice(0, 120));
+      }
     } catch (e) {
       kino.log("resolver: búsqueda falló:", String(e.status || e.code || e.message).slice(0, 120));
     }
@@ -410,6 +441,25 @@ async function resolverManga(anilistId, malId, title, token) {
         body: { json: { query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: MANGA, isAdult: false) { " + campos + " } } }", variables: { s: title } } }
       });
       media = elegirMedia(r && r.data && r.data.Page && r.data.Page.media, title);
+      // v0.8.0 — segunda pasada SOLO entre manga +18: con el filtro de
+      // siempre (isAdult: false) un manga adulto jamás salía por su
+      // nombre — los +18 de LectorXd y compañía. Solo se acepta si el
+      // título calza de verdad; nada de "el primero de la lista".
+      if (!media) {
+        try {
+          const r2 = await fetchJson("https://graphql.anilist.co", {
+            method: "POST", headers: headers,
+            body: { json: { query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: MANGA, isAdult: true) { " + campos + " } } }", variables: { s: title } } }
+          });
+          const m2 = elegirMedia(r2 && r2.data && r2.data.Page && r2.data.Page.media, title);
+          if (m2 && calzaMedia(m2, title)) {
+            media = m2;
+            kino.log("manga: encontrada entre los +18 de AniList");
+          }
+        } catch (e2) {
+          kino.log("manga: pasada +18 falló:", String((e2 && e2.message) || e2).slice(0, 120));
+        }
+      }
     } catch (e) {
       kino.log("manga: búsqueda por título falló:", String((e && e.message) || e).slice(0, 120));
     }
@@ -475,6 +525,25 @@ function normTitulo(s) {
     out += j >= 0 ? sinA[j] : t[i];
   }
   return out.replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// ¿El candidato calza con el título de verdad? (exacto tras normalizar,
+// o uno contiene al otro con 10 letras o más). Es la misma vara de
+// elegirMedia, sin su red de "el primero de la lista": para las series
+// +18 nada de aceptar por parecido vago — si no calza, no se marca.
+function calzaMedia(m, title) {
+  if (!m) return false;
+  const q = normTitulo(title);
+  if (!q) return true;   // sin título no hay con qué comparar: pasa
+  const nombres = [m && m.title && m.title.romaji, m && m.title && m.title.english]
+    .concat((m && m.synonyms) || []);
+  for (let t = 0; t < nombres.length; t++) {
+    const nt = normTitulo(nombres[t]);
+    if (!nt) continue;
+    if (nt === q) return true;
+    if (nt.length >= 10 && q.length >= 10 && (nt.indexOf(q) >= 0 || q.indexOf(nt) >= 0)) return true;
+  }
+  return false;
 }
 
 // De los candidatos de AniList elige el que mejor calza con el título
@@ -885,3 +954,4 @@ export async function action(key) {
 
   return { message: partes.join("  ·  ") };
 }
+
