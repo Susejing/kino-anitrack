@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "author": "Susejing",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "apiVersion": 14,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -59,7 +59,7 @@
       "key": "iniciar",
       "label": "Iniciar sesión",
       "type": "section",
-      "hint": "La manera más fácil está en la pantalla del plugin: Inicio ▸ AniTrack ▸ «Iniciar sesión» — la ventanita se cierra sola y no hay que copiar nada. Esto de abajo es el método manual de respaldo: toca el botón, autoriza en la web y vuelve a copiar la dirección de la barra del navegador para pegarla en su campo.",
+      "hint": "La manera más fácil está en la pantalla del plugin: Inicio ▸ AniTrack ▸ «Iniciar sesión» — la ventanita se cierra sola y no hay que copiar nada. Esto de abajo es el método manual de respaldo.",
       "devices": ["phone"]
     },
     {

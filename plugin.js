@@ -19,6 +19,11 @@
 // títulos larguísimos: la búsqueda viaja ahora con el comienzo del
 // título (64 letras), y el emparejamiento sigue siendo con el título
 // completo.
+// v0.9.1 — arreglo del manifiesto: el hint de la sección «Iniciar sesión»
+// de Ajustes medía 308 letras y la regla oficial de los formularios es
+// máximo 300 en una sección, así que la app rechazaba la actualización
+// (la misma trampa del label de 43 de la v0.5.2). Se acorta el hint;
+// ni una línea de código cambia.
 // v0.9.0 — iniciar sesión es tocar y autorizar: nueva pantalla propia del
 // plugin (Inicio ▸ AniTrack) con una ventanita de autorización que se
 // cierra sola al caer en example.com; el plugin captura la dirección
@@ -30,7 +35,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.9.0";
+const VERSION = "0.9.1";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -493,6 +498,7 @@ async function resolverManga(anilistId, malId, title, token) {
       ? media.mediaListEntry.progress : null
   };
 }
+
 
 // Marca un capítulo de manga en la lista de MAL: el endpoint de manga
 // es PATCH con num_chapters_read (el de anime era PUT con episodios).
@@ -993,6 +999,7 @@ export async function action(key) {
 export async function screen(arg) {
   const state = (arg && arg.state) || arg || {};
   let alNombre = "";
+
   let malNombre = "";
   try { alNombre = String(kino.storage.get("anilistNombre") || ""); } catch (e) { alNombre = ""; }
   try { malNombre = String(kino.storage.get("malNombre") || ""); } catch (e) { malNombre = ""; }
@@ -1196,6 +1203,7 @@ export async function screenEvent(ev) {
 
   return null;
 }
+
 
 
 
