@@ -3,6 +3,18 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.10.0 — el puente de MangaDex: precisión al emparejar mangas
+// japoneses, chinos y coreanos, normales o +18. Cuando AniList y MAL no
+// hallan la serie por su título (el nombre en español que puso la
+// fuente, el original en japonés/chino/coreano, o un +18 que los
+// catálogos esconden), MangaDex la busca en TODOS sus idiomas a la
+// vez — título original, inglés y español entre sus títulos
+// alternativos — y sus «links» traen los ids EXACTOS de AniList y
+// MAL: metadato que los propios sitios conectan, no un parecido de
+// nombre. También completa el enlace de MAL cuando AniList halló la
+// serie pero sin él (manhuas chinos, series nuevas). La vara de
+// siempre: solo vale si el título calza de verdad y sin empate, con
+// resultados +18 incluidos y caché de éxitos (7 días) y fallos (6 h).
 // v0.8.0 — los +18 existen: las búsquedas por título llevaban clavado el
 // filtro «isAdult: false» de AniList, así que un manga o anime +18
 // jamás aparecía por su nombre (la documentación de AniList lo dice:
@@ -42,7 +54,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.9.2";
+const VERSION = "0.10.0";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -648,6 +660,66 @@ async function buscarMangaMAL(titulo) {
   }
 }
 
+// v0.10.0 — el puente de MangaDex: busca la serie por título en
+// MangaDex, que guarda cada serie con su nombre en TODOS sus idiomas
+// (original japonés/chino/coreano, inglés, español…) y publica en sus
+// «links» los ids EXACTOS de AniList y MAL. Con eso un título en
+// español halla su equivalente original y los ids vienen de un
+// metadato verificado, no de un parecido de nombre. La misma vara de
+// siempre: exacto tras normalizar o contención de 10 o más, solo si
+// calza de verdad y SIN empate (nada de marcar una serie parecida).
+// Caché de éxitos (7 días) y de fallos (6 h) en el almacén local.
+async function idsMangaDex(titulo) {
+  await null;
+  const t = String(titulo || "").trim();
+  if (!t) return null;
+  const clave = "mdIds:" + t.slice(0, 80);
+  let cache = null;
+  try { cache = kino.storage.get(clave) || null; } catch (e) { cache = null; }
+  if (cache && typeof cache === "object") {
+    if (cache.al || cache.mal) return cache;
+    if (cache.fallo && Date.now() - cache.fallo < 6 * 3600000) return null;
+  }
+  try {
+    const j = await fetchJson("https://api.mangadex.org/manga?limit=5&title=" + encodeURIComponent(t)
+      + "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&contentRating[]=pornographic");
+    const datos = (j && j.data) || [];
+    const q = normTitulo(t);
+    if (!q) return null;
+    let mejor = null, mejorP = 0, empate = false;
+    for (let i = 0; i < datos.length; i++) {
+      const a = datos[i] && datos[i].attributes;
+      if (!a) continue;
+      const nombres = Object.keys(a.title || {}).map((k) => a.title[k])
+        .concat((a.altTitles || []).map((o) => o && Object.keys(o).length ? o[Object.keys(o)[0]] : ""));
+      let p = 0;
+      for (let n = 0; n < nombres.length; n++) {
+        const nt = normTitulo(nombres[n]);
+        if (!nt) continue;
+        if (nt === q) { p = 3; break; }
+        if (nt.length >= 10 && q.length >= 10 && (nt.indexOf(q) >= 0 || q.indexOf(nt) >= 0)) p = Math.max(p, 2);
+      }
+      if (p > mejorP) { mejorP = p; mejor = datos[i]; empate = false; }
+      else if (p > 0 && p === mejorP) empate = true;
+    }
+    if (mejor && mejorP >= 2 && !empate) {
+      const Lk = (mejor.attributes && mejor.attributes.links) || {};
+      const idDe = (v) => { const mm = String(v || "").match(/(\d+)\D*$/); return mm ? parseInt(mm[1], 10) : 0; };
+      const ids = { al: idDe(Lk.al), mal: idDe(Lk.mal) };
+      if (ids.al || ids.mal) {
+        try { kino.storage.set(clave, ids, 604800000); } catch (e2) { /* almacén lleno */ }
+        kino.log("manga: puente MangaDex ✓ «" + t.slice(0, 40) + "»: al " + ids.al + ", mal " + ids.mal);
+        return ids;
+      }
+    }
+    try { kino.storage.set(clave, { fallo: Date.now() }, 21600000); } catch (e2) { /* almacén lleno */ }
+    kino.log("manga: puente MangaDex sin hallazgo claro para «" + t.slice(0, 40) + "»");
+  } catch (e) {
+    kino.log("manga: puente MangaDex falló:", String((e && e.message) || e).slice(0, 100));
+  }
+  return null;
+}
+
 // El progreso de manga que hay hoy en la lista de MAL de la persona
 // (para no rebajarla jamás).
 async function progresoMangaMAL(malId) {
@@ -693,6 +765,36 @@ export async function proto_manga_markChapter(arg) {
   if (!manga && limpio && limpio !== title) {
     manga = await resolverManga(0, 0, limpio, anilistToken);
     if (manga) kino.log("manga: encontrada sin el adorno del título («" + title.slice(0, 40) + "»)");
+  }
+  // v0.10.0 — el puente de MangaDex, en dos ayudas:
+  // (a) AniList halló la serie pero SIN su enlace de MAL (manhuas
+  // chinos, series muy nuevas): los links de MangaDex traen el id
+  // exacto de MAL — metadato verificado, mejor que otro parecido.
+  // (b) Nadie la halló: MangaDex busca el título en todos sus idiomas
+  // (español, inglés, original) y sus links resuelven la serie
+  // entera — o al menos su id de MAL.
+  if (manga && !manga.mal && malListo) {
+    const md = await idsMangaDex(manga.titulo || title);
+    if (md && md.mal) {
+      manga.mal = md.mal;
+      kino.log("manga: enlace de MAL por el puente de MangaDex (id " + md.mal + ")");
+    }
+  }
+  if (!manga || (!manga.anilist && !manga.mal)) {
+    let md = await idsMangaDex(title);
+    if (!md && limpio && limpio !== title) md = await idsMangaDex(limpio);
+    if (md) {
+      let media3 = null;
+      if (md.al) media3 = await resolverManga(md.al, 0, title, anilistToken);
+      if (media3) {
+        manga = media3;
+        if (!manga.mal && md.mal) manga.mal = md.mal;
+        kino.log("manga: hallada por el puente de MangaDex («" + title.slice(0, 40) + "»)");
+      } else if (md.mal && malListo) {
+        manga = { anilist: null, mal: md.mal, titulo: title, leido: null };
+        kino.log("manga: solo MAL, por el puente de MangaDex (id " + md.mal + ")");
+      }
+    }
   }
   // v0.7.1 — afinar el emparejamiento con MAL: (a) AniList la tiene
   // pero sin enlace a MAL (típico de manhuas chinos y series muy
