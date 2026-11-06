@@ -19,6 +19,10 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.13.3 — EL MAPA CRECE Y LA BÚSQUEDA SE HACE ANCHA. Seis series
+// más del log del usuario entran al mapa (con ids verificados contra
+// los enlaces oficiales de MangaDex y MAL), y la búsqueda por título
+// en AniList pasa de 5 a 10 candidatas: más series resuelven solas.
 // v0.13.2 — EL MAPA DE TÍTULOS. Series que las fuentes traen con el
 // nombre traducido y el buscador no halla: van fijadas a mano, con ids
 // verificados contra las páginas reales. markChapter y progress las
@@ -124,7 +128,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.13.2";
+const VERSION = "0.13.3";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -783,7 +787,7 @@ async function resolverManga(anilistId, malId, title, token) {
     try {
       const r = await fetchJson("https://graphql.anilist.co", {
         method: "POST", headers: headers,
-        body: { json: { query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: MANGA, isAdult: false) { " + campos + " } } }", variables: { s: title } } }
+        body: { json: { query: "query ($s: String) { Page(perPage: 10) { media(search: $s, type: MANGA, isAdult: false) { " + campos + " } } }", variables: { s: title } } }
       });
       media = elegirMedia(r && r.data && r.data.Page && r.data.Page.media, title);
       // v0.8.0 — segunda pasada SOLO entre manga +18: con el filtro de
@@ -794,7 +798,7 @@ async function resolverManga(anilistId, malId, title, token) {
         try {
           const r2 = await fetchJson("https://graphql.anilist.co", {
             method: "POST", headers: headers,
-            body: { json: { query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: MANGA, isAdult: true) { " + campos + " } } }", variables: { s: title } } }
+            body: { json: { query: "query ($s: String) { Page(perPage: 10) { media(search: $s, type: MANGA, isAdult: true) { " + campos + " } } }", variables: { s: title } } }
           });
           const m2 = elegirMedia(r2 && r2.data && r2.data.Page && r2.data.Page.media, title);
           if (m2 && calzaMedia(m2, title)) {
@@ -886,7 +890,15 @@ const MAPA_TITULOS = {
   "te gusto yo no mi hija": { al: 118760, mal: 129795 },
   "despues de dejar de actuar como un perro me converti en un magnate celestial urbano": { al: 168137, mal: 0 },
   "mi ventana de estado se declaro en huelga": { al: 189358, mal: 0 },
-  "operacion corazon acelerado": { al: 204586, mal: 189761 }
+  "operacion corazon acelerado": { al: 204586, mal: 189761 },
+  // v0.13.3 — la segunda tanda del log del usuario (ids verificados
+  // contra MangaDex/MAL, que publican los enlaces oficiales).
+  "incluso en una historia de fantasmas tengo que trabajar": { al: 212562, mal: 193929 },
+  "providencia de primer nivel cultiva en silencio durante miles de anos": { al: 154258, mal: 0 },
+  "mi camino simulado hacia la inmortalidad": { al: 204126, mal: 0 },
+  "a lifelong yearning for you": { al: 0, mal: 192743 },
+  "como convertirse en un empleado legendario": { al: 180580, mal: 170073 },
+  "taste folder zip": { al: 210119, mal: 0 }
 };
 // ¿Este título está en el mapa? Devuelve { al, mal } o null. Segunda
 // pasada por prefijo: si la fuente recorta el título, la llave más
