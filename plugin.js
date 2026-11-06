@@ -19,6 +19,26 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.12.0 — EL RANGO DE LOS ANIMES. La lluvia de plugins de anime en Kino
+// (JKAnime, MonosChinos, TioAnime, AnimeAV1, Latanime, AnimES, MundoDonghua
+// y los animes de FlixLatam, GnulaHD, Megadede y tantos otros) hace que la
+// mayoría de los episodios lleguen SOLO con el título — en español y con
+// adornos del sitio — porque sus catálogos no nombran ids de AniList/MAL.
+// El rango de identificación se amplía en varias vueltas: (1) el título se
+// busca entre los 6 primeros de AniList y se VERIFICA el calce (romaji,
+// inglés, nativo o sinónimo), como ya hacía el lado manga; (2) se reintenta
+// limpio de adornos («Sub Español», «Temporada 2»…); (3) los +18 con la
+// misma vara; (4) MAL por título con la llave pública del autor — guarda
+// nombres en español entre sus títulos alternativos y rescata series que
+// AniList no halla —, completando el AniList que falte; (5) de último, el
+// «primero de la lista» de la búsqueda de siempre queda como piso de
+// compatibilidad. Y las series por temporadas ya no se marcan en la
+// primera: si el evento trae season >= 2 (o el título dice «Temporada N»),
+// se sigue la cadena de secuelas de AniList hasta la entrada correcta.
+// Todo con caché (7 días los aciertos, 6 h los fallos), como el manga.
+// HONESTO: Kino nunca avisa de lo +18 marcado como adult (regla de su
+// capability tracking), ni de lo que se ve por Chromecast/DLNA, canales en
+// vivo o un capítulo sin número — eso no lo arregla ningún plugin.
 // v0.11.0 — LA VUELTA DE LA INTEGRACIÓN: la puerta "manga" gana la llamada
 // "progress". Hasta ahora el flujo era de una sola mano: MangaTrack avisaba
 // aquí cada capítulo y estas listas se actualizaban. La petición de la
@@ -82,7 +102,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.11.0";
+const VERSION = "0.12.0";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -230,12 +250,217 @@ async function probarTokenAniList(token) {
 // ---------- resolver qué anime es ----------
 
 // Kino ya manda ids.anilist / ids.mal cuando los conoce. Si no, probamos con
-// ARM (mapea IMDb/TMDB -> AniList/MAL) y, como último recurso, búsqueda por
-// título en AniList.
-async function resolverAnime(ids, title) {
+// Kino ya manda ids.anilist / ids.mal cuando la fuente los nombra; si trae
+// IMDb o TMDB, ARM los mapea. Y cuando lo único que llega es el TÍTULO — el
+// caso más común entre los plugins de anime en español, que no traen ids —,
+// la búsqueda va en pasadas: tal cual llegó, limpia de adornos del sitio,
+// entre los +18, y en MAL, que guarda nombres en español entre sus títulos
+// alternativos. La vara de siempre: gana el calce claro y verificado; el
+// "primero de la lista" de la búsqueda queda de último, como piso de
+// compatibilidad (era el único camino antes de la 0.12.0). Las series por
+// temporadas se marcan en su entrada: si el evento trae season >= 2 (o el
+// título nombra "Temporada N"), se sigue la cadena de secuelas de AniList.
+// Con caché de éxitos (7 días) y fallos (6 h), como el lado manga.
+
+// Adornos que ponen los sitios de anime al final del título: idiomas,
+// "Temporada N" y similares. AniList y MAL no los conocen; sin ellos la
+// búsqueda calza. El número de temporada no se pierde: track() lo lee del
+// título tal cual llegó y lo usa para la cadena de secuelas.
+function tituloAnime(t) {
+  let s = tituloLimpio(t);
+  let antes = "";
+  while (antes !== s) {
+    antes = s;
+    s = s.replace(/\s*[-\u2013\u2014:|]?\s*(sub\s*espa[\u00f1n]ol|subtitulado(?:\s*(?:al\s*)?espa[\u00f1n]ol)?|espa[\u00f1n]ol\s*latino|audio\s*latino|audio\s*castellano|en\s*espa[\u00f1n]ol|castellano|latino|online)\s*$/i, "").trim();
+    s = s.replace(/\s*[-\u2013\u2014:|]?\s*(temporada|temp|season)\s*(\d+)\s*$/i, "").trim();
+  }
+  return s;
+}
+
+// El número de temporada que el propio título nombra ("… Temporada 2",
+// "… Season 2"), o 0 si no lo dice.
+function temporadaEnTitulo(t) {
+  const mm = String(t || "").match(/\b(?:temporada|temp|season)\s*(\d+)\b/i);
+  return mm ? parseInt(mm[1], 10) : 0;
+}
+
+// Busca anime en AniList por título (sin adultos) y devuelve la lista con
+// romaji, inglés, nativo y sinónimos para poder verificar el calce.
+async function buscarAniListAnime(t) {
   await null;
+  const s = String(t || "").trim();
+  if (!s) return [];
+  try {
+    const r = await fetchJson("https://graphql.anilist.co", {
+      method: "POST",
+      body: { json: {
+        query: "query ($s: String) { Page(perPage: 6) { media(search: $s, type: ANIME, isAdult: false) { id idMal title { romaji english native } synonyms } } }",
+        variables: { s: s.slice(0, 64) }
+      } }
+    });
+    return (r && r.data && r.data.Page && r.data.Page.media) || [];
+  } catch (e) {
+    kino.log("resolver: búsqueda en AniList falló:", String(e.status || e.code || e.message).slice(0, 120));
+    return [];
+  }
+}
+
+// ¿Alguno de la lista calza con el título de verdad? La misma vara de
+// calzaMedia, aplicada a la lista entera.
+function calzaListaAnime(lista, title) {
+  if (!Array.isArray(lista) || !lista.length) return null;
+  const q = normTitulo(title);
+  if (!q) return lista[0];
+  for (let i = 0; i < lista.length; i++) {
+    if (calzaMedia(lista[i], title)) return lista[i];
+  }
+  return null;
+}
+
+// La segunda pasada de siempre entre los +18: solo se acepta si el título
+// calza de verdad (nada de "el primero de la lista").
+async function buscarAnimeAdulto(t) {
+  await null;
+  const s = String(t || "").trim();
+  if (!s) return null;
+  try {
+    const r2 = await fetchJson("https://graphql.anilist.co", {
+      method: "POST",
+      body: { json: {
+        query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: ANIME, isAdult: true) { id idMal title { romaji english } synonyms } } }",
+        variables: { s: s.slice(0, 64) }
+      } }
+    });
+    const lista2 = (r2 && r2.data && r2.data.Page && r2.data.Page.media) || [];
+    for (let i = 0; i < lista2.length; i++) {
+      if (calzaMedia(lista2[i], s)) return lista2[i];
+    }
+  } catch (e2) {
+    kino.log("resolver: pasada +18 falló:", String(e2.status || e2.code || e2.message).slice(0, 120));
+  }
+  return null;
+}
+
+// v0.12.0 — busca anime en MAL por título con la llave PÚBLICA del autor
+// (el mismo client id de los botones: MAL acepta consultas de lectura sin
+// sesión con X-MAL-CLIENT-ID, y con sesión se usa el token de la persona).
+// MAL guarda nombres en español entre sus títulos alternativos, así que
+// esta pasada rescata series que AniList no halla por su nombre en español.
+// La vara de buscarMangaMAL: calce claro y SIN empate, o no se marca.
+async function buscarAnimeMAL(titulo) {
+  await null;
+  try {
+    let headers = { "X-MAL-CLIENT-ID": MAL_CLIENT_ID_AUTOR };
+    try {
+      const tok = await malToken();
+      if (tok) headers = { Authorization: "Bearer " + tok };
+    } catch (eS) { /* sin sesión de MAL: la llave pública */ }
+    const r = await kino.fetch("https://api.myanimelist.net/v2/anime?q=" + encodeURIComponent(String(titulo).slice(0, 64))
+      + "&limit=8&fields=id,title,alternative_titles", { headers: headers });
+    if (!r.ok) { kino.log("resolver: búsqueda en MAL HTTP " + r.status); return null; }
+    const j = r.json();
+    const datos = (j && j.data) || [];
+    if (!Array.isArray(datos) || !datos.length) return null;
+    const q = normTitulo(titulo);
+    if (!q) return null;
+    let mejor = null, mejorP = 0, empate = false;
+    for (let i = 0; i < datos.length; i++) {
+      const nodo = datos[i] && datos[i].node;
+      if (!nodo || !nodo.id) continue;
+      const alt = (nodo.alternative_titles && nodo.alternative_titles.synonyms) || [];
+      const titulos = [nodo.title, nodo.alternative_titles && nodo.alternative_titles.en,
+        nodo.alternative_titles && nodo.alternative_titles.ja].concat(alt);
+      let p = 0;
+      for (let t = 0; t < titulos.length; t++) {
+        const nt = normTitulo(titulos[t]);
+        if (!nt) continue;
+        if (nt === q) { p = 3; break; }
+        if (nt.length >= 10 && q.length >= 10 && (nt.indexOf(q) >= 0 || q.indexOf(nt) >= 0)) p = Math.max(p, 2);
+      }
+      if (p > mejorP) { mejorP = p; mejor = nodo.id; empate = false; }
+      else if (p > 0 && p === mejorP && nodo.id !== mejor) empate = true;
+    }
+    if (mejor && mejorP >= 2 && !empate) return mejor;
+    return null;
+  } catch (e) {
+    kino.log("resolver: búsqueda en MAL falló:", String((e && e.message) || e).slice(0, 80));
+    return null;
+  }
+}
+
+// v0.12.0 — las temporadas: AniList guarda cada temporada como su propia
+// entrada, unida a la anterior por una relación SEQUEL. Si el evento dice
+// season >= 2, se sigue la cadena esa cantidad de saltos para marcar la
+// entrada correcta. Si la cadena se corta (una serie corrida como One Piece
+// no tiene secuelas), se queda donde llegó. Solo se aplica cuando la serie
+// se identificó por IMDb/TMDB o por título: los ids exactos de AniList/MAL
+// que manda la fuente ya son la entrada de verdad.
+async function conTemporada(anime, temporada) {
+  await null;
+  if (!anime || !anime.anilist || !(temporada >= 2)) return anime;
+  let a = anime.anilist;
+  let m = anime.mal;
+  const saltos = Math.min(temporada - 1, 8);
+  for (let hop = 0; hop < saltos; hop++) {
+    let r;
+    try {
+      r = await fetchJson("https://graphql.anilist.co", {
+        method: "POST",
+        body: { json: {
+          query: "query ($id: Int) { Media(id: $id) { relations { edges { relationType node { id idMal format } } } } }",
+          variables: { id: a }
+        } }
+      });
+    } catch (e) {
+      kino.log("resolver: secuelas falló:", String(e.status || e.code || e.message).slice(0, 120));
+      break;
+    }
+    const edges = (r && r.data && r.data.Media && r.data.Media.relations && r.data.Media.relations.edges) || [];
+    let sig = null;
+    for (let i = 0; i < edges.length; i++) {
+      const ed = edges[i];
+      if (ed && ed.relationType === "SEQUEL" && ed.node && ed.node.id
+        && ed.node.format !== "MOVIE") { sig = ed.node; break; }
+    }
+    if (!sig) break;
+    a = sig.id;
+    m = sig.idMal || null;
+  }
+  if (a !== anime.anilist) {
+    kino.log("resolver: temporada " + temporada + " → otra entrada de AniList");
+    return { anilist: a, mal: m };
+  }
+  return anime;
+}
+
+// La clave del caché de resolución: por ids exactos cuando los hay (ese
+// resultado no depende de la temporada), por IMDb/TMDB o por título cuando
+// no, con la temporada cuando puede mover la entrada.
+function claveResAnime(ids, title, temporada) {
+  if (ids && (ids.anilist || ids.mal)) return "resA:id:" + (ids.anilist || 0) + "/" + (ids.mal || 0);
+  if (ids && (ids.imdb || ids.tmdb)) return "resA:arm:" + (ids.imdb || "0") + "/" + (ids.tmdb || 0)
+    + (temporada >= 2 ? "|s" + temporada : "");
+  return "resA:t:" + normTitulo(title).slice(0, 60) + (temporada >= 2 ? "|s" + temporada : "");
+}
+
+async function resolverAnime(ids, title, temporada) {
+  await null;
+  // Caché: un acierto vale 7 días, un fallo 6 horas (la serie puede aparecer
+  // en los catálogos cualquier día; los adornos del sitio no cambian solos).
+  const clave = claveResAnime(ids, title, temporada || 0);
+  let cache = null;
+  try { cache = kino.storage.get(clave) || null; } catch (e) { cache = null; }
+  if (cache && typeof cache === "object") {
+    if ((cache.a || cache.m) && cache.ts && Date.now() - cache.ts < 7 * 24 * 3600000) {
+      return { anilist: cache.a || null, mal: cache.m || null };
+    }
+    if (cache.fallo && Date.now() - cache.fallo < 6 * 3600000) return null;
+  }
+
+  let resuelto = null;
+  let andarTemporada = false;
+
   if (ids && (ids.anilist || ids.mal)) {
-                                        
     let a = ids.anilist || null;
     let m = ids.mal || null;
     // Si Kino trae solo uno de los dos ids, completar el que falta con una
@@ -265,66 +490,93 @@ async function resolverAnime(ids, title) {
       }
     }
     kino.log("resolver: ids directos de Kino (anilist:", a, "mal:", m, ")");
-    return { anilist: a, mal: m };
-  }
-  if (ids && (ids.imdb || ids.tmdb)) {
-    const q = new URLSearchParams({ sources: "anilist,mal" });
-    if (ids.imdb) q.set("imdb_id", ids.imdb);
-    if (ids.tmdb) q.set("tmdb_id", String(ids.tmdb));
-    try {
-      const found = await fetchJson("https://arm.haglund.dev/api/v2/search?" + q);
-      if (found && found.length) {
-        kino.log("resolver: ARM encontró el anime");
-        return { anilist: found[0].anilist_id, mal: found[0].mal_id };
-      }
-      kino.log("resolver: ARM no lo encontró");
-    } catch (e) {
-                                                                                       
-      kino.log("resolver: ARM falló:", String(e.status || e.code || e.message).slice(0, 120));
-    }
-  }
-  if (title) {
-    try {
-      const r = await fetchJson("https://graphql.anilist.co", {
-        method: "POST",
-        body: { json: {
-          query: "query ($s: String) { Page(perPage: 1) { media(search: $s, type: ANIME, isAdult: false) { id idMal } } }",
-          variables: { s: title }
-        } }
-      });
-      const media = r && r.data && r.data.Page && r.data.Page.media && r.data.Page.media[0];
-      if (media) {
-        kino.log("resolver: búsqueda por título encontró el anime");
-        return { anilist: media.id, mal: media.idMal || null };
-      }
-      kino.log("resolver: búsqueda por título sin resultados");
-      // v0.8.0 — segunda pasada SOLO entre anime +18: con el filtro de
-      // siempre (isAdult: false) un anime adulto jamás salía por su
-      // nombre. Solo se acepta si el título calza de verdad.
+    // ids exactos: la entrada es la de verdad; las temporadas del evento son
+    // dentro de esa entrada. Nada de saltar por la cadena de secuelas.
+    resuelto = { anilist: a, mal: m };
+  } else {
+    if (ids && (ids.imdb || ids.tmdb)) {
+      const q = new URLSearchParams({ sources: "anilist,mal" });
+      if (ids.imdb) q.set("imdb_id", ids.imdb);
+      if (ids.tmdb) q.set("tmdb_id", String(ids.tmdb));
       try {
-        const r2 = await fetchJson("https://graphql.anilist.co", {
-          method: "POST",
-          body: { json: {
-            query: "query ($s: String) { Page(perPage: 5) { media(search: $s, type: ANIME, isAdult: true) { id idMal title { romaji english } synonyms } } }",
-            variables: { s: title }
-          } }
-        });
-        const lista2 = (r2 && r2.data && r2.data.Page && r2.data.Page.media) || [];
-        for (let i = 0; i < lista2.length; i++) {
-          if (calzaMedia(lista2[i], title)) {
-            kino.log("resolver: anime +18 encontrado por título");
-            return { anilist: lista2[i].id, mal: lista2[i].idMal || null };
-          }
+        const found = await fetchJson("https://arm.haglund.dev/api/v2/search?" + q);
+        if (found && found.length) {
+          kino.log("resolver: ARM encontró el anime");
+          resuelto = { anilist: found[0].anilist_id, mal: found[0].mal_id };
+          andarTemporada = true;
+        } else {
+          kino.log("resolver: ARM no lo encontró");
         }
-      } catch (e2) {
-        kino.log("resolver: pasada +18 falló:", String(e2.status || e2.code || e2.message).slice(0, 120));
+      } catch (e) {
+        kino.log("resolver: ARM falló:", String(e.status || e.code || e.message).slice(0, 120));
       }
-    } catch (e) {
-      kino.log("resolver: búsqueda falló:", String(e.status || e.code || e.message).slice(0, 120));
+    }
+    if (!resuelto && title) {
+      const limpio = tituloAnime(title);
+      // 1. El título tal cual llegó, verificando el calce entre los 6
+      //    primeros de AniList (romaji, inglés, nativo o sinónimo).
+      const lista = await buscarAniListAnime(title);
+      const m1 = calzaListaAnime(lista, title);
+      if (m1) resuelto = { anilist: m1.id, mal: m1.idMal || null };
+      // 2. Limpio de los adornos del sitio ("Sub Español", "Temporada 2"…):
+      //    con ellos AniList muchas veces no halla nada.
+      if (!resuelto && limpio && limpio !== title) {
+        const lista2 = await buscarAniListAnime(limpio);
+        const m2 = calzaListaAnime(lista2, limpio);
+        if (m2) {
+          resuelto = { anilist: m2.id, mal: m2.idMal || null };
+          kino.log("resolver: hallado con el título limpio");
+        }
+      }
+      // 3. Entre los +18 (tal cual y limpio), con la vara de siempre.
+      if (!resuelto) {
+        const adulto = await buscarAnimeAdulto(title)
+          || (limpio && limpio !== title ? await buscarAnimeAdulto(limpio) : null);
+        if (adulto) {
+          resuelto = { anilist: adulto.id, mal: adulto.idMal || null };
+          kino.log("resolver: anime +18 encontrado por título");
+        }
+      }
+      // 4. MAL por título: guarda nombres en español entre sus alternativos;
+      //    si trae el de AniList, se completa (y si no, solo MAL — algo es
+      //    algo, y la lista de MAL es de MAL).
+      if (!resuelto) {
+        const malId = await buscarAnimeMAL(limpio || title);
+        if (malId) {
+          let a = null;
+          try {
+            const r = await fetchJson("https://graphql.anilist.co", {
+              method: "POST",
+              body: { json: { query: "query ($idMal: Int) { Media(idMal: $idMal) { id } }", variables: { idMal: malId } } }
+            });
+            if (r.data && r.data.Media) a = r.data.Media.id;
+          } catch (e) { /* queda el id de MAL */ }
+          resuelto = { anilist: a, mal: malId };
+          kino.log("resolver: hallado en MAL por título", a ? "(con AniList)" : "(solo MAL)");
+        }
+      }
+      // 5. Piso de compatibilidad: el primero del ranking de AniList, que
+      //    era el único camino antes de la 0.12.0. Solo si nada verificó.
+      if (!resuelto && lista && lista.length) {
+        resuelto = { anilist: lista[0].id, mal: lista[0].idMal || null };
+        kino.log("resolver: sin calce claro; por descarte, el primero del ranking");
+      }
+      if (resuelto) andarTemporada = true;
     }
   }
+
+  if (resuelto && andarTemporada) {
+    resuelto = await conTemporada(resuelto, temporada || 0);
+  }
+
+  if (resuelto && (resuelto.anilist || resuelto.mal)) {
+    try { kino.storage.set(clave, { a: resuelto.anilist, m: resuelto.mal, ts: Date.now() }, 604800000); } catch (e2) { /* almacén lleno */ }
+    return resuelto;
+  }
+  try { kino.storage.set(clave, { fallo: Date.now() }, 21600000); } catch (e2) { /* almacén lleno */ }
   return null;
 }
+
 
 // ---------- AniList ----------
 
@@ -984,9 +1236,13 @@ export async function track(event) {
   const ids = event.kind === "episode" ? (event.show && event.show.ids) || {} : event.ids || {};
   const titulo = event.kind === "episode" ? event.show && event.show.title : event.title;
 
+  // v0.12.0 — la temporada del evento (o la que nombra el propio título)
+  // para que las series por temporadas marquen su entrada correcta.
+  const temporada = event.kind === "episode"
+    ? Math.max(event.season || 1, temporadaEnTitulo(titulo) || 1) : 1;
+
   try {
-                                        
-    const anime = await resolverAnime(ids, titulo);
+    const anime = await resolverAnime(ids, titulo, temporada);
     if (!anime || (!anime.anilist && !anime.mal)) {
       kino.log("track: no se pudo identificar el anime; evento ignorado");
       return { skipped: true };
