@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "author": "Susejing",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "apiVersion": 14,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -34,7 +34,7 @@
       "visualBrowser": true,
       "provides": {
         "manga": {
-          "summary": "Capítulos de manga leídos: se marcan en tus listas de AniList y MyAnimeList. «whoami» dice qué cuenta hay con sesión (para que otros plugins no pidan el nombre a mano).",
+          "summary": "Capítulos de manga leídos: se marcan en tus listas de AniList y MyAnimeList. «whoami» dice qué cuenta tiene sesión.",
           "calls": {
             "markChapter": {
               "in": {

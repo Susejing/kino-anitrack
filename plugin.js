@@ -19,6 +19,16 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.13.1 — LA PUERTA VOLVIÓ A ABRIRSE. El resumen de la puerta en el
+// manifiesto creció a 168 caracteres en la 0.13.0 y el límite del motor
+// son 120: un bloque de enhancements que rompe una regla se DESCARTA
+// entero (docs/protocol.md), así que Kino botó la puerta "manga"
+// completa y TODAS sus llamadas (markChapter, progress, whoami)
+// respondían not_declared — la sincronización de MangaTrack murió en
+// silencio, sin toast ni marca en AniList/MAL. Arreglo: resumen corto
+// (≤ 120 caracteres) y nada más; whoami queda igual. Lección: el
+// summary de una puerta NUNCA pasa de 120, y una puerta que rompe una
+// regla no da error visible — simplemente deja de existir.
 // v0.13.0 — LA PUERTITA DISCRETA: la puerta "manga" gana la llamada
 // "whoami". MangaTrack la usa para «Mi AniList»: si aquí ya hay sesión
 // con nombre de usuario guardado (AniList o MAL), se lo dice SIN tocar
@@ -110,7 +120,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.13.0";
+const VERSION = "0.13.1";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
