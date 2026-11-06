@@ -19,6 +19,10 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.13.2 — EL MAPA DE TÍTULOS. Series que las fuentes traen con el
+// nombre traducido y el buscador no halla: van fijadas a mano, con ids
+// verificados contra las páginas reales. markChapter y progress las
+// consultan antes de buscar por título, así marcan a la primera.
 // v0.13.1 — LA PUERTA VOLVIÓ A ABRIRSE. El resumen de la puerta en el
 // manifiesto creció a 168 caracteres en la 0.13.0 y el límite del motor
 // son 120: un bloque de enhancements que rompe una regla se DESCARTA
@@ -120,7 +124,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.13.1";
+const VERSION = "0.13.2";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -871,6 +875,35 @@ function normTitulo(s) {
   return out.replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+// v0.13.2 — EL MAPA DE TÍTULOS. Hay series que las fuentes traen con el
+// nombre traducido y el buscador de AniList no las halla así (el log del
+// usuario las venía botando una y otra vez). Este mapa fija a mano las
+// que se reportaron, con ids verificados uno a uno contra las páginas
+// reales de AniList y MAL. Las llaves salen de normTitulo; mal: 0 = solo
+// AniList (MAL se completa con el enlace del media si existe).
+const MAPA_TITULOS = {
+  "por que no haces que las gemelas sean tus novias juntas": { al: 177184, mal: 169628 },
+  "te gusto yo no mi hija": { al: 118760, mal: 129795 },
+  "despues de dejar de actuar como un perro me converti en un magnate celestial urbano": { al: 168137, mal: 0 },
+  "mi ventana de estado se declaro en huelga": { al: 189358, mal: 0 },
+  "operacion corazon acelerado": { al: 204586, mal: 189761 }
+};
+// ¿Este título está en el mapa? Devuelve { al, mal } o null. Segunda
+// pasada por prefijo: si la fuente recorta el título, la llave más
+// larga que arranca igual basta (con 12 letras o más, nada de aceptar
+// por parecido vago).
+function idsDelMapa(t) {
+  const q = normTitulo(t);
+  if (MAPA_TITULOS[q]) return MAPA_TITULOS[q];
+  let mejor = null;
+  for (const k in MAPA_TITULOS) {
+    if (k.length >= 12 && q.length >= 12 && (k.indexOf(q) === 0 || q.indexOf(k) === 0)) {
+      if (!mejor || k.length > mejor.length) mejor = k;
+    }
+  }
+  return mejor ? MAPA_TITULOS[mejor] : null;
+}
+
 // ¿El candidato calza con el título de verdad? (exacto tras normalizar,
 // o uno contiene al otro con 10 letras o más). Es la misma vara de
 // elegirMedia, sin su red de "el primero de la lista": para las series
@@ -1043,6 +1076,16 @@ export async function proto_manga_markChapter(arg) {
   if (!title || !isFinite(num)) throw new Error("sin título o capítulo");
   const cap = Math.max(0, Math.floor(num));
   const limpio = tituloLimpio(title);
+  // v0.13.2 — mapa de títulos: si quien llama no trae ids y el título
+  // está en el mapa, se usan sus ids verificados y se ahorra una
+  // búsqueda que ya sabemos que falla.
+  if (!Number(arg && arg.anilistId) && !Number(arg && arg.malId)) {
+    const mp = idsDelMapa(title) || (limpio && limpio !== title ? idsDelMapa(limpio) : null);
+    if (mp) {
+      arg = Object.assign({}, arg, { anilistId: mp.al, malId: mp.mal });
+      kino.log("manga: mapa de títulos («" + title.slice(0, 40) + "»)");
+    }
+  }
   const anilistToken = tokenAniList();
   let malListo = false;
   try {
@@ -1184,8 +1227,17 @@ export async function proto_manga_markChapter(arg) {
 export async function proto_manga_progress(arg) {
   await null;
   const title = String((arg && arg.title) || "").trim().slice(0, 200);
-  const anilistId = Number(arg && arg.anilistId) || 0;
-  const malId = Number(arg && arg.malId) || 0;
+  let anilistId = Number(arg && arg.anilistId) || 0;
+  let malId = Number(arg && arg.malId) || 0;
+  // v0.13.2 — mapa de títulos, la misma vara de markChapter.
+  if (!anilistId && !malId) {
+    const mp = idsDelMapa(title);
+    if (mp) {
+      anilistId = mp.al;
+      malId = mp.mal;
+      kino.log("progress: mapa de títulos («" + title.slice(0, 40) + "»)");
+    }
+  }
   const anilistToken = tokenAniList();
   let malListo = false;
   try {
