@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "author": "Susejing",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "apiVersion": 14,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -16,19 +16,25 @@
     "api.mangadex.org",
     "example.com"
   ],
-  "capabilities": ["tracking", "screen"],
+  "capabilities": [
+    "tracking",
+    "screen"
+  ],
   "screen": {
     "label": "AniTrack",
     "labelEn": "AniTrack",
     "menuOpens": "screen",
-    "opensFrom": ["menu", "settings"]
+    "opensFrom": [
+      "menu",
+      "settings"
+    ]
   },
   "enhancements": {
     "20": {
       "visualBrowser": true,
       "provides": {
         "manga": {
-          "summary": "Capítulos de manga leídos: se marcan en tus listas de AniList y MyAnimeList",
+          "summary": "Capítulos de manga leídos: se marcan en tus listas de AniList y MyAnimeList. «whoami» dice qué cuenta hay con sesión (para que otros plugins no pidan el nombre a mano).",
           "calls": {
             "markChapter": {
               "in": {
@@ -47,6 +53,10 @@
                 "malId": "number?"
               },
               "out": "MangaProgress"
+            },
+            "whoami": {
+              "in": {},
+              "out": "MangaWho"
             }
           },
           "types": {
@@ -63,6 +73,11 @@
               "where": "string?",
               "title": "string?",
               "reason": "string?"
+            },
+            "MangaWho": {
+              "found": "boolean",
+              "anilist": "string?",
+              "mal": "string?"
             }
           }
         }
@@ -76,42 +91,54 @@
       "label": "Iniciar sesión",
       "type": "section",
       "hint": "La manera más fácil está en la pantalla del plugin: Inicio ▸ AniTrack ▸ «Iniciar sesión» — la ventanita se cierra sola y no hay que copiar nada. Esto de abajo es el método manual de respaldo.",
-      "devices": ["phone"]
+      "devices": [
+        "phone"
+      ]
     },
     {
       "key": "ayudaLogin",
       "type": "help",
       "title": "Cómo iniciar sesión",
       "body": "La manera más fácil (desde la v0.9.0): abre la pantalla del plugin en Inicio ▸ AniTrack, toca «Iniciar sesión» y autoriza en la ventanita: se cierra sola y la sesión queda guardada. Nada de copiar ni pegar.\n\nEl método manual, si lo prefieres o la ventanita no abre:\n\nAniList:\n1. Toca «Iniciar sesión con AniList» y autoriza.\n2. El navegador queda en example.com con la dirección llena de letras: cópiala completa.\n3. Pégala en «Pega aquí la dirección (AniList)» y toca Guardar.\n\nMyAnimeList:\n1. Toca «Iniciar sesión con MyAnimeList» y autoriza.\n2. El navegador queda en example.com?code=ALGO: cópiala completa.\n3. Pégala en «Pega aquí la dirección (MyAnimeList)», toca Guardar y luego «Probar conexión».\n\nCon eso el plugin queda activo: cada episodio o película que termines se marca solo. Kino te pedirá confirmar en rojo que este plugin puede ver lo que reproduces: es lo que permite marcar tu progreso.",
-      "devices": ["phone"]
+      "devices": [
+        "phone"
+      ]
     },
     {
       "key": "anilistLogin",
       "type": "link",
       "label": "Iniciar sesión con AniList",
       "url": "https://anilist.co/api/v2/oauth/authorize?client_id=53178&response_type=token",
-      "devices": ["phone"]
+      "devices": [
+        "phone"
+      ]
     },
     {
       "key": "anilistUrl",
       "label": "Pega aquí la dirección (AniList)",
       "type": "url",
       "hint": "Copia la dirección del navegador al terminar; el token sale de ahí",
-      "devices": ["phone"]
+      "devices": [
+        "phone"
+      ]
     },
     {
       "key": "malLogin",
       "type": "link",
       "label": "Iniciar sesión con MyAnimeList",
       "url": "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=e2de54b14a697f86d587ae52eeeb70b7&code_challenge=Wy6~bfhephcek4z8A9NsmgdVH-Ie1wBEJsWknXoS~0Kn6Yqn5cWjEEkdu2LiBKfg",
-      "devices": ["phone"]
+      "devices": [
+        "phone"
+      ]
     },
     {
       "key": "malUrl",
       "label": "Pega aquí la dirección (MyAnimeList)",
       "type": "url",
       "hint": "Copia la dirección del navegador al terminar; el código sale de ahí",
-      "devices": ["phone"]
+      "devices": [
+        "phone"
+      ]
     },
     {
       "key": "probar",

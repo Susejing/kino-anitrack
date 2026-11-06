@@ -19,6 +19,14 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.13.0 — LA PUERTITA DISCRETA: la puerta "manga" gana la llamada
+// "whoami". MangaTrack la usa para «Mi AniList»: si aquí ya hay sesión
+// con nombre de usuario guardado (AniList o MAL), se lo dice SIN tocar
+// la red y sin mandar tokens ni nada privado — solo el nombre público
+// que esas plataformas ya muestran en las listas públicas. Con eso, quien
+// tiene AniTrack con sesión no necesita escribir su nombre a mano en
+// MangaTrack: se toma de aquí. Sin sesión responde {found: false} y
+// MangaTrack sigue con su campo de texto de respaldo.
 // v0.12.0 — EL RANGO DE LOS ANIMES. La lluvia de plugins de anime en Kino
 // (JKAnime, MonosChinos, TioAnime, AnimeAV1, Latanime, AnimES, MundoDonghua
 // y los animes de FlixLatam, GnulaHD, Megadede y tantos otros) hace que la
@@ -102,7 +110,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.12.0";
+const VERSION = "0.13.0";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -1299,6 +1307,33 @@ export async function track(event) {
 }
 
 // ---------- validar antes de guardar (apiVersion 6) ----------
+// ---------- whoami (v0.13.0) ----------
+
+// La puertita discreta: dice QUÉN tiene sesión aquí (sin red). Solo lee
+// los nombres de usuario públicos que ya están guardados en el almacén
+// tras iniciar sesión o validar la conexión; nunca manda tokens ni nada
+// privado. MangaTrack la llama al configurar «Mi AniList» para no pedir
+// a mano lo que ya se sabe. Sin sesión: {found: false} y punto — no es
+// error, solo «aquí no hay nadie todavía».
+export async function proto_manga_whoami(arg) {
+  await null;
+  let anilist = "";
+  let mal = "";
+  try { anilist = String(kino.storage.get("anilistNombre") || "").trim().slice(0, 64); } catch (e) { anilist = ""; }
+  try { mal = String(kino.storage.get("malNombre") || "").trim().slice(0, 64); } catch (e) { mal = ""; }
+  const found = !!(anilist || mal);
+  try {
+    kino.log("whoami:", found
+      ? ("anilist=" + (anilist || "-") + " mal=" + (mal || "-"))
+      : "sin sesión");
+  } catch (e) { /* log */ }
+  return {
+    found: found,
+    anilist: anilist || null,
+    mal: mal || null
+  };
+}
+
 
 // Al guardar la configuración se revisa lo pegado: la dirección de AniList
 // debe traer el token (y se prueba contra AniList al instante); la de MAL
