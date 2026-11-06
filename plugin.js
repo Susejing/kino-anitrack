@@ -249,7 +249,6 @@ async function probarTokenAniList(token) {
 
 // ---------- resolver qué anime es ----------
 
-// Kino ya manda ids.anilist / ids.mal cuando los conoce. Si no, probamos con
 // Kino ya manda ids.anilist / ids.mal cuando la fuente los nombra; si trae
 // IMDb o TMDB, ARM los mapea. Y cuando lo único que llega es el TÍTULO — el
 // caso más común entre los plugins de anime en español, que no traen ids —,
