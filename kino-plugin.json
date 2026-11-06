@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "author": "Susejing",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "apiVersion": 14,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -39,6 +39,14 @@
                 "malId": "number?"
               },
               "out": "MangaMark"
+            },
+            "progress": {
+              "in": {
+                "title": "string",
+                "anilistId": "number?",
+                "malId": "number?"
+              },
+              "out": "MangaProgress"
             }
           },
           "types": {
@@ -47,6 +55,13 @@
               "title": "string?",
               "where": "string?",
               "dup": "boolean?",
+              "reason": "string?"
+            },
+            "MangaProgress": {
+              "found": "boolean",
+              "progress": "number?",
+              "where": "string?",
+              "title": "string?",
               "reason": "string?"
             }
           }

@@ -19,6 +19,18 @@
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
 // track(event) por cada película o episodio reproducido en el dispositivo,
 // desde cualquier fuente, y encola los eventos hasta que se entregan.
+// v0.11.0 — LA VUELTA DE LA INTEGRACIÓN: la puerta "manga" gana la llamada
+// "progress". Hasta ahora el flujo era de una sola mano: MangaTrack avisaba
+// aquí cada capítulo y estas listas se actualizaban. La petición de la
+// persona: que lo visto en AniList y MAL también LLEGUE al plugin — si
+// marcó el capítulo 10 o 20 en la web o donde sea, que MangaTrack lo
+// muestre como visto. "progress" responde con el progreso que hay HOY en
+// las listas de la persona: el de AniList (mediaListEntry, ya venía en
+// resolverManga para no rebajar) y el de MAL (num_chapters_read), y manda
+// el MAYOR de los dos con la etiqueta de dónde salió. MangaTrack decide
+// qué hace con él (sus marcas ✓ solo suben, nunca bajan). La misma vara
+// de identificación que markChapter: primero ids exactos, luego título,
+// y sin sesión se responde con el motivo, no con error seco.
 // v0.10.0 — el puente de MangaDex: precisión al emparejar mangas
 // japoneses, chinos y coreanos, normales o +18. Cuando AniList y MAL no
 // hallan la serie por su título (el nombre en español que puso la
@@ -70,7 +82,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.10.0";
+const VERSION = "0.11.0";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -888,6 +900,66 @@ export async function proto_manga_markChapter(arg) {
   if (yaEstaba) return { marked: true, dup: true, title: manga.titulo, where: "" };
   if (fallo) return { marked: false, reason: "fallo", title: title };
   return { marked: false, reason: "sin-id", title: title };
+}
+
+// v0.11.0 — la llamada "progress" de la puerta manga: LA VUELTA de la
+// integración. proto_manga_progress({ title, anilistId?, malId? })
+// responde { found, progress?, where?, title?, reason? } con el
+// progreso que hay HOY en las listas de la persona: el de AniList
+// (mediaListEntry, que resolverManga ya trae) y el de MAL
+// (num_chapters_read) — manda el MAYOR de los dos y de dónde salió.
+// Quien llama decide qué hace con él (MangaTrack solo SUBE sus marcas
+// ✓, nunca las baja). Los motivos: "sin-sesion", "no-encontrada" y
+// "sin-lista" (la serie existe pero la persona no la tiene en ninguna
+// lista: progreso 0, que es una respuesta válida y distinta).
+export async function proto_manga_progress(arg) {
+  await null;
+  const title = String((arg && arg.title) || "").trim().slice(0, 200);
+  const anilistId = Number(arg && arg.anilistId) || 0;
+  const malId = Number(arg && arg.malId) || 0;
+  const anilistToken = tokenAniList();
+  let malListo = false;
+  try {
+    malListo = !!(credencialesMAL() && (codigoMAL() || kino.storage.get("malRefreshTokenRotado")));
+  } catch (e) { malListo = false; }
+  if (!anilistToken && !malListo) {
+    return { found: false, reason: "sin-sesion", title: title };
+  }
+  // Identificación: la misma vara de markChapter — ids exactos primero,
+  // título después (con su segunda pasada +18 si hace falta).
+  let manga = await resolverManga(anilistId, malId, title, anilistToken);
+  const limpio = tituloLimpio(title);
+  if (!manga && limpio && limpio !== title) {
+    manga = await resolverManga(0, 0, limpio, anilistToken);
+  }
+  if (!manga || (!manga.anilist && !manga.mal)) {
+    kino.log("progress: no encontrada («" + title.slice(0, 60) + "»)");
+    return { found: false, reason: "no-encontrada", title: title };
+  }
+  // AniList: el progreso viene en el propio mediaListEntry (null si la
+  // persona no la tiene en su lista).
+  let mejor = null;
+  let donde = "";
+  if (anilistToken && manga.anilist && typeof manga.leido === "number") {
+    mejor = manga.leido;
+    donde = "AniList";
+  }
+  // MAL: num_chapters_read de su lista (0 si no la tiene anotada).
+  if (manga.mal && malListo) {
+    let pm = null;
+    try { pm = await progresoMangaMAL(manga.mal); }
+    catch (e) { pm = null; }
+    if (pm !== null && (mejor === null || pm > mejor)) {
+      mejor = pm;
+      donde = "MyAnimeList";
+    }
+  }
+  if (mejor === null) {
+    kino.log("progress: sin lista de la persona («" + title.slice(0, 40) + "»)");
+    return { found: false, reason: "sin-lista", title: manga.titulo };
+  }
+  kino.log("progress: «" + String(manga.titulo || "").slice(0, 40) + "» lleva " + mejor + " (" + donde + ")");
+  return { found: true, progress: Math.max(0, Math.floor(mejor)), where: donde, title: manga.titulo };
 }
 
 // ---------- track (la capability "tracking") ----------
