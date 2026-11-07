@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "author": "Susejing",
-  "version": "0.13.3",
+  "version": "0.13.4",
   "apiVersion": 14,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -57,6 +57,14 @@
             "whoami": {
               "in": {},
               "out": "MangaWho"
+            },
+            "aprender": {
+              "in": {
+                "title": "string",
+                "anilistId": "number?",
+                "malId": "number?"
+              },
+              "out": "MangaAprendido"
             }
           },
           "types": {
@@ -78,6 +86,11 @@
               "found": "boolean",
               "anilist": "string?",
               "mal": "string?"
+            },
+            "MangaAprendido": {
+              "learned": "boolean",
+              "total": "number?",
+              "title": "string?"
             }
           }
         }

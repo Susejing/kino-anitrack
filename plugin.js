@@ -14,6 +14,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+// AniTrack v0.13.4 — EL MAPA QUE APRENDE. MangaTrack puede enseñar aquí los
+// pares «título de la fuente → ids de AniList/MAL» cada vez que una serie
+// queda vinculada con identidad cierta (elección de la persona o calce
+// exacto). La llamada nueva de la puerta, «aprender», los guarda en el
+// almacén (tope 300, TTL de 6 meses) y «idsDelMapa» los consulta igual que
+// el mapa a mano: la próxima marca con ese título resuelve a la primera,
+// aunque el otro plugin pierda su vínculo o la serie se lea desde otra
+// fuente. Todo lo demás queda igual.
+
 // AniTrack: plugin de Kino que actualiza tu progreso de anime en AniList y
 // MyAnimeList, sin importar desde qué fuente (plugin) lo estés reproduciendo.
 // Usa la capability "tracking" (apiVersion 7, Kino 0.9.51+): Kino llama a
@@ -128,7 +137,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.13.3";
+const VERSION = "0.13.4";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -907,13 +916,17 @@ const MAPA_TITULOS = {
 function idsDelMapa(t) {
   const q = normTitulo(t);
   if (MAPA_TITULOS[q]) return MAPA_TITULOS[q];
+  // v0.13.4 — el mapa que aprende: lo enseñado vale como el a mano.
+  const ap = idsAprendidas(q, 0);
+  if (ap) return ap;
   let mejor = null;
   for (const k in MAPA_TITULOS) {
     if (k.length >= 12 && q.length >= 12 && (k.indexOf(q) === 0 || q.indexOf(k) === 0)) {
       if (!mejor || k.length > mejor.length) mejor = k;
     }
   }
-  return mejor ? MAPA_TITULOS[mejor] : null;
+  if (mejor) return MAPA_TITULOS[mejor];
+  return idsAprendidas(q, 1);
 }
 
 // ¿El candidato calza con el título de verdad? (exacto tras normalizar,
@@ -1236,6 +1249,56 @@ export async function proto_manga_markChapter(arg) {
 // ✓, nunca las baja). Los motivos: "sin-sesion", "no-encontrada" y
 // "sin-lista" (la serie existe pero la persona no la tiene en ninguna
 // lista: progreso 0, que es una respuesta válida y distinta).
+// v0.13.4 — EL MAPA QUE APRENDE (almacén). Los pares que MangaTrack
+// enseña por la puerta viven en la clave «mapaAprendido»: llave =
+// título normalizado, valor = { al, mal, t, ts }. Tope de 300 pares
+// con poda de las más viejas; TTL generoso de 6 meses.
+function mapaAprendidoLeer() {
+  try {
+    const m = kino.storage.get("mapaAprendido");
+    return (m && typeof m === "object") ? m : {};
+  } catch (e) { return {}; }
+}
+
+function idsAprendidas(q, conPrefijo) {
+  if (!q) return null;
+  const m = mapaAprendidoLeer();
+  const e = m[q];
+  if (e && Number(e.al) > 0) return { al: Number(e.al), mal: Number(e.mal) || 0 };
+  if (!conPrefijo) return null;
+  let mejor = null;
+  for (const k in m) {
+    if (k.length >= 12 && q.length >= 12 && (k.indexOf(q) === 0 || q.indexOf(k) === 0)) {
+      if (!mejor || k.length > mejor.length) mejor = k;
+    }
+  }
+  return mejor ? { al: Number(m[mejor].al), mal: Number(m[mejor].mal) || 0 } : null;
+}
+
+// v0.13.4 — LA PUERTA QUE APRENDE. La llama MangaTrack cada vez que una
+// serie queda vinculada con identidad cierta: el par se guarda en el
+// mapa aprendido y las próximas marcas con ese título (vengan de donde
+// vengan, incluso sin ids) resuelven a la primera.
+export async function proto_manga_aprender(arg) {
+  await null;
+  const title = String((arg && arg.title) || "").trim().slice(0, 120);
+  const al = Math.max(0, Math.floor(Number(arg && arg.anilistId) || 0));
+  const mal = Math.max(0, Math.floor(Number(arg && arg.malId) || 0));
+  if (!title || !al) throw new Error("aprender: falta el título o el id de AniList");
+  const q = normTitulo(title);
+  if (!q) throw new Error("aprender: título sin letras");
+  const m = mapaAprendidoLeer();
+  m[q] = { al: al, mal: mal, t: title, ts: Date.now() };
+  const llaves = Object.keys(m);
+  if (llaves.length > 300) {
+    llaves.sort(function (a, b) { return (m[a].ts || 0) - (m[b].ts || 0); });
+    for (let i = 0; i < llaves.length - 300; i++) delete m[llaves[i]];
+  }
+  try { kino.storage.set("mapaAprendido", m, 15552000000); } catch (e) { /* almacén lleno */ }
+  kino.log("manga: aprendí «" + title.slice(0, 40) + "» → AniList " + al + " (mapa: " + Object.keys(m).length + ")");
+  return { learned: true, total: Object.keys(m).length, title: title };
+}
+
 export async function proto_manga_progress(arg) {
   await null;
   const title = String((arg && arg.title) || "").trim().slice(0, 200);
