@@ -2,7 +2,7 @@
   "id": "anitrack",
   "name": "AniTrack — AniList y MAL",
   "author": "Susejing",
-  "version": "0.13.4",
+  "version": "0.13.5",
   "apiVersion": 14,
   "entry": "plugin.js",
   "icon": "icon.png",

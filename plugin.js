@@ -14,6 +14,18 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+// AniTrack v0.13.5 — EL ALMACÉN ES DE TEXTO. El contrato oficial (kino.d.ts)
+// dice que kino.storage solo guarda cadenas (set pide `value: string`, get
+// devuelve `string | null`) y que su TTL máximo son 30 días (2.592.000.000
+// ms: un TTL mayor hace LANZAR a set antes de tocar la entrada). La 0.13.4
+// guardaba el mapa aprendido como OBJETO con TTL de 6 meses: set fallaba en
+// silencio y el mapa jamás se guardaba — MangaTrack creía haber enseñado y
+// aquí se olvidaba al instante (la misma trampa silenciosa de FlixTrack).
+// Lo mismo pasaba con los cachés de resolución, el puente de MangaDex y la
+// lista de eventos entregados: objetos que se perdían. Ahora todo lo
+// estructurado viaja como JSON (guardarJson/leerJson), el mapa aprendido
+// vive en una entrada permanente podada por edad (6 meses) y tope (300),
+// y ningún TTL pasa del máximo del contrato.
 // AniTrack v0.13.4 — EL MAPA QUE APRENDE. MangaTrack puede enseñar aquí los
 // pares «título de la fuente → ids de AniList/MAL» cada vez que una serie
 // queda vinculada con identidad cierta (elección de la persona o calce
@@ -137,7 +149,7 @@
 // autorizar en la web y pegar la dirección donde quedó el navegador.
 /// <reference path="./kino.d.ts" />
 
-const VERSION = "0.13.4";
+const VERSION = "0.13.5";
 
 // El Client ID de la app PÚBLICA de MyAnimeList del autor (la misma del
 // botón "Iniciar sesión con MyAnimeList"). Es de tipo Android y no tiene
@@ -177,14 +189,38 @@ async function fetchJson(url, options) {
 // Evita entregar dos veces el mismo evento (Kino reintenta; el id es la clave).
 // Si el almacenamiento fallara, no debe tumbar la entrega: se ignora y sigue.
                                         
+// v0.13.5 — el almacén de Kino solo guarda TEXTO (kino.d.ts): set pide
+// `value: string` y get devuelve `string | null`. Todo lo estructurado
+// viaja como JSON; el TTL máximo son 30 días (2.592.000.000 ms: uno mayor
+// hace LANZAR a set antes de tocar la entrada).
+function guardarJson(clave, valor, ttlMs) {
+  try {
+    kino.storage.set(clave, JSON.stringify(valor), ttlMs);
+    return true;
+  } catch (e) {
+    kino.log("storage falló:", e.code || "sin código");
+    return false;
+  }
+}
+
+function leerJson(clave) {
+  try {
+    const t = kino.storage.get(clave);
+    if (typeof t !== "string" || !t) return null;
+    return JSON.parse(t);
+  } catch (e) {
+    return null;
+  }
+}
+
 function yaEntregado(id) {
   try {
-    let seen = kino.storage.get("seen");
+    let seen = leerJson("seen");
     if (!Array.isArray(seen)) seen = [];
     if (seen.indexOf(id) >= 0) return true;
     seen.push(id);
     while (seen.length > 50) seen.shift();
-    kino.storage.set("seen", seen, 2500000000); // margen bajo el máximo
+    guardarJson("seen", seen, 2500000000); // margen bajo el máximo
   } catch (e) {
     kino.log("storage falló:", e.code || "sin código");
   }
@@ -483,7 +519,7 @@ async function resolverAnime(ids, title, temporada) {
   // en los catálogos cualquier día; los adornos del sitio no cambian solos).
   const clave = claveResAnime(ids, title, temporada || 0);
   let cache = null;
-  try { cache = kino.storage.get(clave) || null; } catch (e) { cache = null; }
+  try { cache = leerJson(clave); } catch (e) { cache = null; }
   if (cache && typeof cache === "object") {
     if ((cache.a || cache.m) && cache.ts && Date.now() - cache.ts < 7 * 24 * 3600000) {
       return { anilist: cache.a || null, mal: cache.m || null };
@@ -604,10 +640,10 @@ async function resolverAnime(ids, title, temporada) {
   }
 
   if (resuelto && (resuelto.anilist || resuelto.mal)) {
-    try { kino.storage.set(clave, { a: resuelto.anilist, m: resuelto.mal, ts: Date.now() }, 604800000); } catch (e2) { /* almacén lleno */ }
+    guardarJson(clave, { a: resuelto.anilist, m: resuelto.mal, ts: Date.now() }, 604800000);
     return resuelto;
   }
-  try { kino.storage.set(clave, { fallo: Date.now() }, 21600000); } catch (e2) { /* almacén lleno */ }
+  guardarJson(clave, { fallo: Date.now() }, 21600000);
   return null;
 }
 
@@ -1030,7 +1066,7 @@ async function idsMangaDex(titulo) {
   if (!t) return null;
   const clave = "mdIds:" + t.slice(0, 80);
   let cache = null;
-  try { cache = kino.storage.get(clave) || null; } catch (e) { cache = null; }
+  try { cache = leerJson(clave); } catch (e) { cache = null; }
   if (cache && typeof cache === "object") {
     if (cache.al || cache.mal) return cache;
     if (cache.fallo && Date.now() - cache.fallo < 6 * 3600000) return null;
@@ -1062,12 +1098,12 @@ async function idsMangaDex(titulo) {
       const idDe = (v) => { const mm = String(v || "").match(/(\d+)\D*$/); return mm ? parseInt(mm[1], 10) : 0; };
       const ids = { al: idDe(Lk.al), mal: idDe(Lk.mal) };
       if (ids.al || ids.mal) {
-        try { kino.storage.set(clave, ids, 604800000); } catch (e2) { /* almacén lleno */ }
+        guardarJson(clave, ids, 604800000);
         kino.log("manga: puente MangaDex ✓ «" + t.slice(0, 40) + "»: al " + ids.al + ", mal " + ids.mal);
         return ids;
       }
     }
-    try { kino.storage.set(clave, { fallo: Date.now() }, 21600000); } catch (e2) { /* almacén lleno */ }
+    guardarJson(clave, { fallo: Date.now() }, 21600000);
     kino.log("manga: puente MangaDex sin hallazgo claro para «" + t.slice(0, 40) + "»");
   } catch (e) {
     kino.log("manga: puente MangaDex falló:", String((e && e.message) || e).slice(0, 100));
@@ -1252,12 +1288,11 @@ export async function proto_manga_markChapter(arg) {
 // v0.13.4 — EL MAPA QUE APRENDE (almacén). Los pares que MangaTrack
 // enseña por la puerta viven en la clave «mapaAprendido»: llave =
 // título normalizado, valor = { al, mal, t, ts }. Tope de 300 pares
-// con poda de las más viejas; TTL generoso de 6 meses.
+// con poda de las más viejas; entrada permanente con la edad (6 meses)
+// dentro del JSON: el TTL del almacén no pasa de 30 días.
 function mapaAprendidoLeer() {
-  try {
-    const m = kino.storage.get("mapaAprendido");
-    return (m && typeof m === "object") ? m : {};
-  } catch (e) { return {}; }
+  const m = leerJson("mapaAprendido");
+  return (m && typeof m === "object") ? m : {};
 }
 
 function idsAprendidas(q, conPrefijo) {
@@ -1288,13 +1323,20 @@ export async function proto_manga_aprender(arg) {
   const q = normTitulo(title);
   if (!q) throw new Error("aprender: título sin letras");
   const m = mapaAprendidoLeer();
-  m[q] = { al: al, mal: mal, t: title, ts: Date.now() };
+  // v0.13.5 — poda por edad (6 meses) y tope (300). La entrada es
+  // PERMANENTE (sin TTL): el máximo del almacén son 30 días, así que la
+  // edad vive dentro del JSON y esta poda la hace cumplir de verdad.
+  const ahora = Date.now();
+  for (const k in m) {
+    if (!m[k] || !m[k].ts || ahora - m[k].ts > 15552000000) delete m[k];
+  }
+  m[q] = { al: al, mal: mal, t: title, ts: ahora };
   const llaves = Object.keys(m);
   if (llaves.length > 300) {
     llaves.sort(function (a, b) { return (m[a].ts || 0) - (m[b].ts || 0); });
     for (let i = 0; i < llaves.length - 300; i++) delete m[llaves[i]];
   }
-  try { kino.storage.set("mapaAprendido", m, 15552000000); } catch (e) { /* almacén lleno */ }
+  guardarJson("mapaAprendido", m);
   kino.log("manga: aprendí «" + title.slice(0, 40) + "» → AniList " + al + " (mapa: " + Object.keys(m).length + ")");
   return { learned: true, total: Object.keys(m).length, title: title };
 }

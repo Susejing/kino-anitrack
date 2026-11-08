@@ -8,6 +8,7 @@
 - ✅ Si un servicio falla, el otro sigue funcionando
 - 🔒 Tus tokens **nunca salen de tu dispositivo** más que hacia cada servicio
 - 🚀 **Iniciar sesión toma un minuto**: un botón, una autorización y una pegada
+- 🧠 **Aprende de MangaTrack**: los pares título→ids que le enseña quedan guardados en este aparato y la próxima marca resuelve a la primera
 
 **Requisito:** Kino **0.9.74 o más reciente** (si el plugin te dice que necesita una versión más nueva de Kino, actualiza la app).
 
